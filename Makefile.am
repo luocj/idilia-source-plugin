@@ -51,7 +51,7 @@ plugins_libadd = \
 	$(PLUGINS_LIBS) \
 	$(NULL)
 
-if ENABLE_PLUGIN_STREAMING
+if ENABLE_PLUGIN_SOURCE
 plugin_LTLIBRARIES += plugins/libidilia_source.la
 plugins_libidilia_source_la_SOURCES = plugins/idilia_source.c
 plugins_libidilia_source_la_CFLAGS = $(plugins_cflags)
