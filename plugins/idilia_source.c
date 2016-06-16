@@ -1,8 +1,9 @@
-/*! \file   janus_echotest.c
+/*! \file   idilia_source.c
  * \author Lorenzo Miniero <lorenzo@meetecho.com>
+ *         Tomasz Zajac <tomasz.zajac@motorolasolutions.com>
  * \copyright GNU General Public License v3
- * \brief  Janus EchoTest plugin
- * \details  This is a trivial EchoTest plugin for Janus, just used to
+ * \brief  Idilia source plugin
+ * \details  This is a trivial SourcePlugin for Janus, just used to
  * showcase the plugin interface. A peer attaching to this plugin will
  * receive back the same RTP packets and RTCP messages he sends: the
  * RTCP messages, of course, would be modified on the way by the gateway
@@ -18,7 +19,7 @@
  * REMB messages before sending them back, in order to trick the peer into
  * thinking the available bandwidth is different).
  * 
- * \section echoapi Echo Test API
+ * \section sourceapi Source Plugin API
  * 
  * There's a single unnamed request you can send and it's asynchronous,
  * which means all responses (successes and errors) will be delivered
@@ -52,7 +53,7 @@
  * 
 \verbatim
 {
-	"echotest" : "event",
+	"source" : "event",
 	"result": "ok"
 }
 \endverbatim
@@ -62,19 +63,19 @@
  * 
 \verbatim
 {
-	"echotest" : "event",
+	"source" : "event",
 	"error_code" : <numeric ID, check Macros below>,
 	"error" : "<error description as a string>"
 }
 \endverbatim
  *
  * If the plugin detects a loss of the associated PeerConnection, a
- * "done" notification is triggered to inform the application the Echo
- * Test session is over:
+ * "done" notification is triggered to inform the application the Source
+ * Plugin session is over:
  * 
 \verbatim
 {
-	"echotest" : "event",
+	"source" : "event",
 	"result": "done"
 }
 \endverbatim
@@ -97,65 +98,65 @@
 
 
 /* Plugin information */
-#define JANUS_ECHOTEST_VERSION			6
-#define JANUS_ECHOTEST_VERSION_STRING	"0.0.6"
-#define JANUS_ECHOTEST_DESCRIPTION		"This is a trivial EchoTest plugin for Janus, just used to showcase the plugin interface."
-#define JANUS_ECHOTEST_NAME				"JANUS EchoTest plugin"
-#define JANUS_ECHOTEST_AUTHOR			"Meetecho s.r.l."
-#define JANUS_ECHOTEST_PACKAGE			"idilia.plugin.source"
+#define JANUS_SOURCE_VERSION			1
+#define JANUS_SOURCE_VERSION_STRING	    "0.0.1"
+#define JANUS_SOURCE_DESCRIPTION		"Idilia source plugin"
+#define JANUS_SOURCE_NAME		        "Idilia Source plugin"
+#define JANUS_SOURCE_AUTHOR			    "Motorola Solutions Inc."
+#define JANUS_SOURCE_PACKAGE			"idilia.plugin.source"
 
 /* Plugin methods */
 janus_plugin *create(void);
-int janus_echotest_init(janus_callbacks *callback, const char *config_path);
-void janus_echotest_destroy(void);
-int janus_echotest_get_api_compatibility(void);
-int janus_echotest_get_version(void);
-const char *janus_echotest_get_version_string(void);
-const char *janus_echotest_get_description(void);
-const char *janus_echotest_get_name(void);
-const char *janus_echotest_get_author(void);
-const char *janus_echotest_get_package(void);
-void janus_echotest_create_session(janus_plugin_session *handle, int *error);
-struct janus_plugin_result *janus_echotest_handle_message(janus_plugin_session *handle, char *transaction, char *message, char *sdp_type, char *sdp);
-void janus_echotest_setup_media(janus_plugin_session *handle);
-void janus_echotest_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
-void janus_echotest_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
-void janus_echotest_incoming_data(janus_plugin_session *handle, char *buf, int len);
-void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int video);
-void janus_echotest_hangup_media(janus_plugin_session *handle);
-void janus_echotest_destroy_session(janus_plugin_session *handle, int *error);
-char *janus_echotest_query_session(janus_plugin_session *handle);
+int janus_source_init(janus_callbacks *callback, const char *config_path);
+void janus_source_destroy(void);
+int janus_source_get_api_compatibility(void);
+int janus_source_get_version(void);
+const char *janus_source_get_version_string(void);
+const char *janus_source_get_description(void);
+const char *janus_source_get_name(void);
+const char *janus_source_get_author(void);
+const char *janus_source_get_package(void);
+void janus_source_create_session(janus_plugin_session *handle, int *error);
+struct janus_plugin_result *janus_source_handle_message(janus_plugin_session *handle, char *transaction, char *message, char *sdp_type, char *sdp);
+void janus_source_setup_media(janus_plugin_session *handle);
+void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
+void janus_source_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
+void janus_source_incoming_data(janus_plugin_session *handle, char *buf, int len);
+void janus_source_slow_link(janus_plugin_session *handle, int uplink, int video);
+void janus_source_hangup_media(janus_plugin_session *handle);
+void janus_source_destroy_session(janus_plugin_session *handle, int *error);
+char *janus_source_query_session(janus_plugin_session *handle);
 
 /* Plugin setup */
-static janus_plugin janus_echotest_plugin =
+static janus_plugin janus_source_plugin =
 	JANUS_PLUGIN_INIT (
-		.init = janus_echotest_init,
-		.destroy = janus_echotest_destroy,
+		.init = janus_source_init,
+		.destroy = janus_source_destroy,
 
-		.get_api_compatibility = janus_echotest_get_api_compatibility,
-		.get_version = janus_echotest_get_version,
-		.get_version_string = janus_echotest_get_version_string,
-		.get_description = janus_echotest_get_description,
-		.get_name = janus_echotest_get_name,
-		.get_author = janus_echotest_get_author,
-		.get_package = janus_echotest_get_package,
+		.get_api_compatibility = janus_source_get_api_compatibility,
+		.get_version = janus_source_get_version,
+		.get_version_string = janus_source_get_version_string,
+		.get_description = janus_source_get_description,
+		.get_name = janus_source_get_name,
+		.get_author = janus_source_get_author,
+		.get_package = janus_source_get_package,
 		
-		.create_session = janus_echotest_create_session,
-		.handle_message = janus_echotest_handle_message,
-		.setup_media = janus_echotest_setup_media,
-		.incoming_rtp = janus_echotest_incoming_rtp,
-		.incoming_rtcp = janus_echotest_incoming_rtcp,
-		.incoming_data = janus_echotest_incoming_data,
-		.slow_link = janus_echotest_slow_link,
-		.hangup_media = janus_echotest_hangup_media,
-		.destroy_session = janus_echotest_destroy_session,
-		.query_session = janus_echotest_query_session,
+		.create_session = janus_source_create_session,
+		.handle_message = janus_source_handle_message,
+		.setup_media = janus_source_setup_media,
+		.incoming_rtp = janus_source_incoming_rtp,
+		.incoming_rtcp = janus_source_incoming_rtcp,
+		.incoming_data = janus_source_incoming_data,
+		.slow_link = janus_source_slow_link,
+		.hangup_media = janus_source_hangup_media,
+		.destroy_session = janus_source_destroy_session,
+		.query_session = janus_source_query_session,
 	);
 
 /* Plugin creator */
 janus_plugin *create(void) {
-	JANUS_LOG(LOG_VERB, "%s created!\n", JANUS_ECHOTEST_NAME);
-	return &janus_echotest_plugin;
+	JANUS_LOG(LOG_VERB, "%s created!\n", JANUS_SOURCE_NAME);
+	return &janus_source_plugin;
 }
 
 
@@ -164,19 +165,19 @@ static volatile gint initialized = 0, stopping = 0;
 static janus_callbacks *gateway = NULL;
 static GThread *handler_thread;
 static GThread *watchdog;
-static void *janus_echotest_handler(void *data);
+static void *janus_source_handler(void *data);
 
-typedef struct janus_echotest_message {
+typedef struct janus_source_message {
 	janus_plugin_session *handle;
 	char *transaction;
 	char *message;
 	char *sdp_type;
 	char *sdp;
-} janus_echotest_message;
+} janus_source_message;
 static GAsyncQueue *messages = NULL;
-static janus_echotest_message exit_message;
+static janus_source_message exit_message;
 
-typedef struct janus_echotest_session {
+typedef struct janus_source_session {
 	janus_plugin_session *handle;
 	gboolean has_audio;
 	gboolean has_video;
@@ -189,12 +190,12 @@ typedef struct janus_echotest_session {
 	guint16 slowlink_count;
 	volatile gint hangingup;
 	gint64 destroyed;	/* Time at which this session was marked as destroyed */
-} janus_echotest_session;
+} janus_source_session;
 static GHashTable *sessions;
 static GList *old_sessions;
 static janus_mutex sessions_mutex;
 
-static void janus_echotest_message_free(janus_echotest_message *msg) {
+static void janus_source_message_free(janus_source_message *msg) {
 	if(!msg || msg == &exit_message)
 		return;
 
@@ -214,15 +215,15 @@ static void janus_echotest_message_free(janus_echotest_message *msg) {
 
 
 /* Error codes */
-#define JANUS_ECHOTEST_ERROR_NO_MESSAGE			411
-#define JANUS_ECHOTEST_ERROR_INVALID_JSON		412
-#define JANUS_ECHOTEST_ERROR_INVALID_ELEMENT	413
+#define JANUS_SOURCE_ERROR_NO_MESSAGE			411
+#define JANUS_SOURCE_ERROR_INVALID_JSON		412
+#define JANUS_SOURCE_ERROR_INVALID_ELEMENT	413
 
 
-/* EchoTest watchdog/garbage collector (sort of) */
-void *janus_echotest_watchdog(void *data);
-void *janus_echotest_watchdog(void *data) {
-	JANUS_LOG(LOG_INFO, "EchoTest watchdog started\n");
+/* SourcePlugin watchdog/garbage collector (sort of) */
+void *janus_source_watchdog(void *data);
+void *janus_source_watchdog(void *data) {
+	JANUS_LOG(LOG_INFO, "SourcePlugin watchdog started\n");
 	gint64 now = 0;
 	while(g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
 		janus_mutex_lock(&sessions_mutex);
@@ -230,16 +231,16 @@ void *janus_echotest_watchdog(void *data) {
 		now = janus_get_monotonic_time();
 		if(old_sessions != NULL) {
 			GList *sl = old_sessions;
-			JANUS_LOG(LOG_HUGE, "Checking %d old EchoTest sessions...\n", g_list_length(old_sessions));
+			JANUS_LOG(LOG_HUGE, "Checking %d old SourcePlugin sessions...\n", g_list_length(old_sessions));
 			while(sl) {
-				janus_echotest_session *session = (janus_echotest_session *)sl->data;
+				janus_source_session *session = (janus_source_session *)sl->data;
 				if(!session) {
 					sl = sl->next;
 					continue;
 				}
 				if(now-session->destroyed >= 5*G_USEC_PER_SEC) {
 					/* We're lazy and actually get rid of the stuff only after a few seconds */
-					JANUS_LOG(LOG_VERB, "Freeing old EchoTest session\n");
+					JANUS_LOG(LOG_VERB, "Freeing old SourcePlugin session\n");
 					GList *rm = sl->next;
 					old_sessions = g_list_delete_link(old_sessions, sl);
 					sl = rm;
@@ -254,13 +255,13 @@ void *janus_echotest_watchdog(void *data) {
 		janus_mutex_unlock(&sessions_mutex);
 		g_usleep(500000);
 	}
-	JANUS_LOG(LOG_INFO, "EchoTest watchdog stopped\n");
+	JANUS_LOG(LOG_INFO, "SourcePlugin watchdog stopped\n");
 	return NULL;
 }
 
 
 /* Plugin implementation */
-int janus_echotest_init(janus_callbacks *callback, const char *config_path) {
+int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	if(g_atomic_int_get(&stopping)) {
 		/* Still stopping from before */
 		return -1;
@@ -272,7 +273,7 @@ int janus_echotest_init(janus_callbacks *callback, const char *config_path) {
 
 	/* Read configuration */
 	char filename[255];
-	g_snprintf(filename, 255, "%s/%s.cfg", config_path, JANUS_ECHOTEST_PACKAGE);
+	g_snprintf(filename, 255, "%s/%s.cfg", config_path, JANUS_SOURCE_PACKAGE);
 	JANUS_LOG(LOG_VERB, "Configuration file: %s\n", filename);
 	janus_config *config = janus_config_parse(filename);
 	if(config != NULL)
@@ -283,31 +284,31 @@ int janus_echotest_init(janus_callbacks *callback, const char *config_path) {
 	
 	sessions = g_hash_table_new(NULL, NULL);
 	janus_mutex_init(&sessions_mutex);
-	messages = g_async_queue_new_full((GDestroyNotify) janus_echotest_message_free);
+	messages = g_async_queue_new_full((GDestroyNotify) janus_source_message_free);
 	/* This is the callback we'll need to invoke to contact the gateway */
 	gateway = callback;
 	g_atomic_int_set(&initialized, 1);
 
 	GError *error = NULL;
 	/* Start the sessions watchdog */
-	watchdog = g_thread_try_new("etest watchdog", &janus_echotest_watchdog, NULL, &error);
+	watchdog = g_thread_try_new("etest watchdog", &janus_source_watchdog, NULL, &error);
 	if(error != NULL) {
 		g_atomic_int_set(&initialized, 0);
-		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the EchoTest watchdog thread...\n", error->code, error->message ? error->message : "??");
+		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the SourcePlugin watchdog thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
 	/* Launch the thread that will handle incoming messages */
-	handler_thread = g_thread_try_new("janus echotest handler", janus_echotest_handler, NULL, &error);
+	handler_thread = g_thread_try_new("janus source handler", janus_source_handler, NULL, &error);
 	if(error != NULL) {
 		g_atomic_int_set(&initialized, 0);
-		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the EchoTest handler thread...\n", error->code, error->message ? error->message : "??");
+		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the Source handler thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
-	JANUS_LOG(LOG_INFO, "%s initialized!\n", JANUS_ECHOTEST_NAME);
+	JANUS_LOG(LOG_INFO, "%s initialized!\n", JANUS_SOURCE_NAME);
 	return 0;
 }
 
-void janus_echotest_destroy(void) {
+void janus_source_destroy(void) {
 	if(!g_atomic_int_get(&initialized))
 		return;
 	g_atomic_int_set(&stopping, 1);
@@ -332,44 +333,44 @@ void janus_echotest_destroy(void) {
 
 	g_atomic_int_set(&initialized, 0);
 	g_atomic_int_set(&stopping, 0);
-	JANUS_LOG(LOG_INFO, "%s destroyed!\n", JANUS_ECHOTEST_NAME);
+	JANUS_LOG(LOG_INFO, "%s destroyed!\n", JANUS_SOURCE_NAME);
 }
 
-int janus_echotest_get_api_compatibility(void) {
+int janus_source_get_api_compatibility(void) {
 	/* Important! This is what your plugin MUST always return: don't lie here or bad things will happen */
 	return JANUS_PLUGIN_API_VERSION;
 }
 
-int janus_echotest_get_version(void) {
-	return JANUS_ECHOTEST_VERSION;
+int janus_source_get_version(void) {
+	return JANUS_SOURCE_VERSION;
 }
 
-const char *janus_echotest_get_version_string(void) {
-	return JANUS_ECHOTEST_VERSION_STRING;
+const char *janus_source_get_version_string(void) {
+	return JANUS_SOURCE_VERSION_STRING;
 }
 
-const char *janus_echotest_get_description(void) {
-	return JANUS_ECHOTEST_DESCRIPTION;
+const char *janus_source_get_description(void) {
+	return JANUS_SOURCE_DESCRIPTION;
 }
 
-const char *janus_echotest_get_name(void) {
-	return JANUS_ECHOTEST_NAME;
+const char *janus_source_get_name(void) {
+	return JANUS_SOURCE_NAME;
 }
 
-const char *janus_echotest_get_author(void) {
-	return JANUS_ECHOTEST_AUTHOR;
+const char *janus_source_get_author(void) {
+	return JANUS_SOURCE_AUTHOR;
 }
 
-const char *janus_echotest_get_package(void) {
-	return JANUS_ECHOTEST_PACKAGE;
+const char *janus_source_get_package(void) {
+	return JANUS_SOURCE_PACKAGE;
 }
 
-void janus_echotest_create_session(janus_plugin_session *handle, int *error) {
+void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		*error = -1;
 		return;
 	}	
-	janus_echotest_session *session = (janus_echotest_session *)g_malloc0(sizeof(janus_echotest_session));
+	janus_source_session *session = (janus_source_session *)g_malloc0(sizeof(janus_source_session));
 	if(session == NULL) {
 		JANUS_LOG(LOG_FATAL, "Memory error!\n");
 		*error = -2;
@@ -392,18 +393,18 @@ void janus_echotest_create_session(janus_plugin_session *handle, int *error) {
 	return;
 }
 
-void janus_echotest_destroy_session(janus_plugin_session *handle, int *error) {
+void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		*error = -1;
 		return;
 	}	
-	janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;
+	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		*error = -2;
 		return;
 	}
-	JANUS_LOG(LOG_VERB, "Removing Echo Test session...\n");
+	JANUS_LOG(LOG_VERB, "Removing Source Plugin session...\n");
 	janus_mutex_lock(&sessions_mutex);
 	if(!session->destroyed) {
 		session->destroyed = janus_get_monotonic_time();
@@ -415,16 +416,16 @@ void janus_echotest_destroy_session(janus_plugin_session *handle, int *error) {
 	return;
 }
 
-char *janus_echotest_query_session(janus_plugin_session *handle) {
+char *janus_source_query_session(janus_plugin_session *handle) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		return NULL;
 	}	
-	janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;
+	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return NULL;
 	}
-	/* In the echo test, every session is the same: we just provide some configure info */
+	/* In the source plugin, every session is the same: we just provide some configure info */
 	json_t *info = json_object();
 	json_object_set_new(info, "audio_active", json_string(session->audio_active ? "true" : "false"));
 	json_object_set_new(info, "video_active", json_string(session->video_active ? "true" : "false"));
@@ -444,10 +445,10 @@ char *janus_echotest_query_session(janus_plugin_session *handle) {
 	return info_text;
 }
 
-struct janus_plugin_result *janus_echotest_handle_message(janus_plugin_session *handle, char *transaction, char *message, char *sdp_type, char *sdp) {
+struct janus_plugin_result *janus_source_handle_message(janus_plugin_session *handle, char *transaction, char *message, char *sdp_type, char *sdp) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return janus_plugin_result_new(JANUS_PLUGIN_ERROR, g_atomic_int_get(&stopping) ? "Shutting down" : "Plugin not initialized");
-	janus_echotest_message *msg = g_malloc0(sizeof(janus_echotest_message));
+	janus_source_message *msg = g_malloc0(sizeof(janus_source_message));
 	if(msg == NULL) {
 		JANUS_LOG(LOG_FATAL, "Memory error!\n");
 		return janus_plugin_result_new(JANUS_PLUGIN_ERROR, "Memory error");
@@ -463,11 +464,11 @@ struct janus_plugin_result *janus_echotest_handle_message(janus_plugin_session *
 	return janus_plugin_result_new(JANUS_PLUGIN_OK_WAIT, "I'm taking my time!");
 }
 
-void janus_echotest_setup_media(janus_plugin_session *handle) {
+void janus_source_setup_media(janus_plugin_session *handle) {
 	JANUS_LOG(LOG_INFO, "WebRTC media is now available\n");
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;	
+	janus_source_session *session = (janus_source_session *)handle->plugin_handle;	
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return;
@@ -478,13 +479,13 @@ void janus_echotest_setup_media(janus_plugin_session *handle) {
 	/* We really don't care, as we only send RTP/RTCP we get in the first place back anyway */
 }
 
-void janus_echotest_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
+void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	/* Simple echo test */
+	/* Simple source plugin */
 	if(gateway) {
 		/* Honour the audio/video active flags */
-		janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;	
+		janus_source_session *session = (janus_source_session *)handle->plugin_handle;	
 		if(!session) {
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
@@ -500,12 +501,12 @@ void janus_echotest_incoming_rtp(janus_plugin_session *handle, int video, char *
 	}
 }
 
-void janus_echotest_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len) {
+void janus_source_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len) {
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	/* Simple echo test */
+	/* Simple source plugin */
 	if(gateway) {
-		janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;	
+		janus_source_session *session = (janus_source_session *)handle->plugin_handle;	
 		if(!session) {
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
@@ -518,12 +519,12 @@ void janus_echotest_incoming_rtcp(janus_plugin_session *handle, int video, char 
 	}
 }
 
-void janus_echotest_incoming_data(janus_plugin_session *handle, char *buf, int len) {
+void janus_source_incoming_data(janus_plugin_session *handle, char *buf, int len) {
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	/* Simple echo test */
+	/* Simple source plugin */
 	if(gateway) {
-		janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;	
+		janus_source_session *session = (janus_source_session *)handle->plugin_handle;	
 		if(!session) {
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
@@ -537,7 +538,7 @@ void janus_echotest_incoming_data(janus_plugin_session *handle, char *buf, int l
 		*(text+len) = '\0';
 		JANUS_LOG(LOG_VERB, "Got a DataChannel message (%zu bytes) to bounce back: %s\n", strlen(text), text);
 		/* We send back the same text with a custom prefix */
-		const char *prefix = "Janus EchoTest here! You wrote: ";
+		const char *prefix = "Janus SourcePlugin here! You wrote: ";
 		char *reply = g_malloc0(strlen(prefix)+len+1);
 		g_snprintf(reply, strlen(prefix)+len+1, "%s%s", prefix, text);
 		g_free(text);
@@ -546,11 +547,11 @@ void janus_echotest_incoming_data(janus_plugin_session *handle, char *buf, int l
 	}
 }
 
-void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int video) {
+void janus_source_slow_link(janus_plugin_session *handle, int uplink, int video) {
 	/* The core is informing us that our peer got or sent too many NACKs, are we pushing media too hard? */
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;	
+	janus_source_session *session = (janus_source_session *)handle->plugin_handle;	
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return;
@@ -580,7 +581,7 @@ void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int vide
 			gateway->relay_rtcp(handle, 1, rtcpbuf, 24);
 			/* As a last thing, notify the user about this */
 			json_t *event = json_object();
-			json_object_set_new(event, "echotest", json_string("event"));
+			json_object_set_new(event, "source", json_string("event"));
 			json_t *result = json_object();
 			json_object_set_new(result, "status", json_string("slow_link"));
 			json_object_set_new(result, "bitrate", json_integer(session->bitrate));
@@ -589,17 +590,17 @@ void janus_echotest_slow_link(janus_plugin_session *handle, int uplink, int vide
 			json_decref(event);
 			json_decref(result);
 			event = NULL;
-			gateway->push_event(session->handle, &janus_echotest_plugin, NULL, event_text, NULL, NULL);
+			gateway->push_event(session->handle, &janus_source_plugin, NULL, event_text, NULL, NULL);
 			g_free(event_text);
 		}
 	}
 }
 
-void janus_echotest_hangup_media(janus_plugin_session *handle) {
+void janus_source_hangup_media(janus_plugin_session *handle) {
 	JANUS_LOG(LOG_INFO, "No WebRTC media anymore\n");
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	janus_echotest_session *session = (janus_echotest_session *)handle->plugin_handle;
+	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return;
@@ -610,12 +611,12 @@ void janus_echotest_hangup_media(janus_plugin_session *handle) {
 		return;
 	/* Send an event to the browser and tell it's over */
 	json_t *event = json_object();
-	json_object_set_new(event, "echotest", json_string("event"));
+	json_object_set_new(event, "source", json_string("event"));
 	json_object_set_new(event, "result", json_string("done"));
 	char *event_text = json_dumps(event, JSON_INDENT(3) | JSON_PRESERVE_ORDER);
 	json_decref(event);
 	JANUS_LOG(LOG_VERB, "Pushing event: %s\n", event_text);
-	int ret = gateway->push_event(handle, &janus_echotest_plugin, NULL, event_text, NULL, NULL);
+	int ret = gateway->push_event(handle, &janus_source_plugin, NULL, event_text, NULL, NULL);
 	JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
 	g_free(event_text);
 	/* Get rid of the recorders, if available */
@@ -642,9 +643,9 @@ void janus_echotest_hangup_media(janus_plugin_session *handle) {
 }
 
 /* Thread to handle incoming messages */
-static void *janus_echotest_handler(void *data) {
-	JANUS_LOG(LOG_VERB, "Joining EchoTest handler thread\n");
-	janus_echotest_message *msg = NULL;
+static void *janus_source_handler(void *data) {
+	JANUS_LOG(LOG_VERB, "Joining SourcePlugin handler thread\n");
+	janus_source_message *msg = NULL;
 	int error_code = 0;
 	char *error_cause = g_malloc0(512);
 	if(error_cause == NULL) {
@@ -659,22 +660,22 @@ static void *janus_echotest_handler(void *data) {
 		if(msg == &exit_message)
 			break;
 		if(msg->handle == NULL) {
-			janus_echotest_message_free(msg);
+			janus_source_message_free(msg);
 			continue;
 		}
-		janus_echotest_session *session = NULL;
+		janus_source_session *session = NULL;
 		janus_mutex_lock(&sessions_mutex);
 		if(g_hash_table_lookup(sessions, msg->handle) != NULL ) {
-			session = (janus_echotest_session *)msg->handle->plugin_handle;
+			session = (janus_source_session *)msg->handle->plugin_handle;
 		}
 		janus_mutex_unlock(&sessions_mutex);
 		if(!session) {
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
-			janus_echotest_message_free(msg);
+			janus_source_message_free(msg);
 			continue;
 		}
 		if(session->destroyed) {
-			janus_echotest_message_free(msg);
+			janus_source_message_free(msg);
 			continue;
 		}
 		/* Handle request */
@@ -683,7 +684,7 @@ static void *janus_echotest_handler(void *data) {
 		JANUS_LOG(LOG_VERB, "Handling message: %s\n", msg->message);
 		if(msg->message == NULL) {
 			JANUS_LOG(LOG_ERR, "No message??\n");
-			error_code = JANUS_ECHOTEST_ERROR_NO_MESSAGE;
+			error_code = JANUS_SOURCE_ERROR_NO_MESSAGE;
 			g_snprintf(error_cause, 512, "%s", "No message??");
 			goto error;
 		}
@@ -691,13 +692,13 @@ static void *janus_echotest_handler(void *data) {
 		root = json_loads(msg->message, 0, &error);
 		if(!root) {
 			JANUS_LOG(LOG_ERR, "JSON error: on line %d: %s\n", error.line, error.text);
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_JSON;
+			error_code = JANUS_SOURCE_ERROR_INVALID_JSON;
 			g_snprintf(error_cause, 512, "JSON error: on line %d: %s", error.line, error.text);
 			goto error;
 		}
 		if(!json_is_object(root)) {
 			JANUS_LOG(LOG_ERR, "JSON error: not an object\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_JSON;
+			error_code = JANUS_SOURCE_ERROR_INVALID_JSON;
 			g_snprintf(error_cause, 512, "JSON error: not an object");
 			goto error;
 		}
@@ -705,35 +706,35 @@ static void *janus_echotest_handler(void *data) {
 		json_t *audio = json_object_get(root, "audio");
 		if(audio && !json_is_boolean(audio)) {
 			JANUS_LOG(LOG_ERR, "Invalid element (audio should be a boolean)\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_ELEMENT;
+			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
 			g_snprintf(error_cause, 512, "Invalid value (audio should be a boolean)");
 			goto error;
 		}
 		json_t *video = json_object_get(root, "video");
 		if(video && !json_is_boolean(video)) {
 			JANUS_LOG(LOG_ERR, "Invalid element (video should be a boolean)\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_ELEMENT;
+			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
 			g_snprintf(error_cause, 512, "Invalid value (video should be a boolean)");
 			goto error;
 		}
 		json_t *bitrate = json_object_get(root, "bitrate");
 		if(bitrate && (!json_is_integer(bitrate) || json_integer_value(bitrate) < 0)) {
 			JANUS_LOG(LOG_ERR, "Invalid element (bitrate should be a positive integer)\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_ELEMENT;
+			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
 			g_snprintf(error_cause, 512, "Invalid value (bitrate should be a positive integer)");
 			goto error;
 		}
 		json_t *record = json_object_get(root, "record");
 		if(record && !json_is_boolean(record)) {
 			JANUS_LOG(LOG_ERR, "Invalid element (record should be a boolean)\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_ELEMENT;
+			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
 			g_snprintf(error_cause, 512, "Invalid value (record should be a boolean)");
 			goto error;
 		}
 		json_t *recfile = json_object_get(root, "filename");
 		if(recfile && !json_is_string(recfile)) {
 			JANUS_LOG(LOG_ERR, "Invalid element (filename should be a string)\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_ELEMENT;
+			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
 			g_snprintf(error_cause, 512, "Invalid value (filename should be a string)");
 			goto error;
 		}
@@ -803,15 +804,15 @@ static void *janus_echotest_handler(void *data) {
 						session->arc = janus_recorder_create(NULL, "opus", filename);
 						if(session->arc == NULL) {
 							/* FIXME We should notify the fact the recorder could not be created */
-							JANUS_LOG(LOG_ERR, "Couldn't open an audio recording file for this EchoTest user!\n");
+							JANUS_LOG(LOG_ERR, "Couldn't open an audio recording file for this SourcePlugin user!\n");
 						}
 					} else {
 						/* Build a filename */
-						g_snprintf(filename, 255, "echotest-%p-%"SCNi64"-audio", session, now);
+						g_snprintf(filename, 255, "source-%p-%"SCNi64"-audio", session, now);
 						session->arc = janus_recorder_create(NULL, "opus", filename);
 						if(session->arc == NULL) {
 							/* FIXME We should notify the fact the recorder could not be created */
-							JANUS_LOG(LOG_ERR, "Couldn't open an audio recording file for this EchoTest user!\n");
+							JANUS_LOG(LOG_ERR, "Couldn't open an audio recording file for this SourcePlugin user!\n");
 						}
 					}
 				}
@@ -824,15 +825,15 @@ static void *janus_echotest_handler(void *data) {
 						session->vrc = janus_recorder_create(NULL, "vp8", filename);
 						if(session->vrc == NULL) {
 							/* FIXME We should notify the fact the recorder could not be created */
-							JANUS_LOG(LOG_ERR, "Couldn't open an video recording file for this EchoTest user!\n");
+							JANUS_LOG(LOG_ERR, "Couldn't open an video recording file for this SourcePlugin user!\n");
 						}
 					} else {
 						/* Build a filename */
-						g_snprintf(filename, 255, "echotest-%p-%"SCNi64"-video", session, now);
+						g_snprintf(filename, 255, "source-%p-%"SCNi64"-video", session, now);
 						session->vrc = janus_recorder_create(NULL, "vp8", filename);
 						if(session->vrc == NULL) {
 							/* FIXME We should notify the fact the recorder could not be created */
-							JANUS_LOG(LOG_ERR, "Couldn't open an video recording file for this EchoTest user!\n");
+							JANUS_LOG(LOG_ERR, "Couldn't open an video recording file for this SourcePlugin user!\n");
 						}
 					}
 					/* Send a PLI */
@@ -854,7 +855,7 @@ static void *janus_echotest_handler(void *data) {
 
 		if(!audio && !video && !bitrate && !record && !msg->sdp) {
 			JANUS_LOG(LOG_ERR, "No supported attributes (audio, video, bitrate, record, jsep) found\n");
-			error_code = JANUS_ECHOTEST_ERROR_INVALID_ELEMENT;
+			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
 			g_snprintf(error_cause, 512, "Message error: no supported attributes (audio, video, bitrate, record, jsep) found");
 			goto error;
 		}
@@ -862,16 +863,16 @@ static void *janus_echotest_handler(void *data) {
 		json_decref(root);
 		/* Prepare JSON event */
 		json_t *event = json_object();
-		json_object_set_new(event, "echotest", json_string("event"));
+		json_object_set_new(event, "source", json_string("event"));
 		json_object_set_new(event, "result", json_string("ok"));
 		char *event_text = json_dumps(event, JSON_INDENT(3) | JSON_PRESERVE_ORDER);
 		json_decref(event);
 		JANUS_LOG(LOG_VERB, "Pushing event: %s\n", event_text);
 		if(!msg->sdp) {
-			int ret = gateway->push_event(msg->handle, &janus_echotest_plugin, msg->transaction, event_text, NULL, NULL);
+			int ret = gateway->push_event(msg->handle, &janus_source_plugin, msg->transaction, event_text, NULL, NULL);
 			JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
 		} else {
-			/* Forward the same offer to the gateway, to start the echo test */
+			/* Forward the same offer to the gateway, to start the source plugin */
 			const char *type = NULL;
 			if(!strcasecmp(msg->sdp_type, "offer"))
 				type = "answer";
@@ -907,13 +908,13 @@ static void *janus_echotest_handler(void *data) {
 			/* How long will the gateway take to push the event? */
 			g_atomic_int_set(&session->hangingup, 0);
 			gint64 start = janus_get_monotonic_time();
-			int res = gateway->push_event(msg->handle, &janus_echotest_plugin, msg->transaction, event_text, type, sdp);
+			int res = gateway->push_event(msg->handle, &janus_source_plugin, msg->transaction, event_text, type, sdp);
 			JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (took %"SCNu64" us)\n",
 				res, janus_get_monotonic_time()-start);
 			g_free(sdp);
 		}
 		g_free(event_text);
-		janus_echotest_message_free(msg);
+		janus_source_message_free(msg);
 		continue;
 		
 error:
@@ -922,19 +923,19 @@ error:
 				json_decref(root);
 			/* Prepare JSON error event */
 			json_t *event = json_object();
-			json_object_set_new(event, "echotest", json_string("event"));
+			json_object_set_new(event, "source", json_string("event"));
 			json_object_set_new(event, "error_code", json_integer(error_code));
 			json_object_set_new(event, "error", json_string(error_cause));
 			char *event_text = json_dumps(event, JSON_INDENT(3) | JSON_PRESERVE_ORDER);
 			json_decref(event);
 			JANUS_LOG(LOG_VERB, "Pushing event: %s\n", event_text);
-			int ret = gateway->push_event(msg->handle, &janus_echotest_plugin, msg->transaction, event_text, NULL, NULL);
+			int ret = gateway->push_event(msg->handle, &janus_source_plugin, msg->transaction, event_text, NULL, NULL);
 			JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
 			g_free(event_text);
-			janus_echotest_message_free(msg);
+			janus_source_message_free(msg);
 		}
 	}
 	g_free(error_cause);
-	JANUS_LOG(LOG_VERB, "Leaving EchoTest handler thread\n");
+	JANUS_LOG(LOG_VERB, "Leaving SourcePlugin handler thread\n");
 	return NULL;
 }
