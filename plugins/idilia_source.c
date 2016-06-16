@@ -102,7 +102,7 @@
 #define JANUS_ECHOTEST_DESCRIPTION		"This is a trivial EchoTest plugin for Janus, just used to showcase the plugin interface."
 #define JANUS_ECHOTEST_NAME				"JANUS EchoTest plugin"
 #define JANUS_ECHOTEST_AUTHOR			"Meetecho s.r.l."
-#define JANUS_ECHOTEST_PACKAGE			"idilia.plugin.echotest"
+#define JANUS_ECHOTEST_PACKAGE			"idilia.plugin.source"
 
 /* Plugin methods */
 janus_plugin *create(void);
