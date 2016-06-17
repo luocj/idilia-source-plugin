@@ -190,10 +190,31 @@ typedef struct janus_source_session {
 	guint16 slowlink_count;
 	volatile gint hangingup;
 	gint64 destroyed;	/* Time at which this session was marked as destroyed */
+	int rtp_port_audio;
+	int rtp_port_video;
+	int sockfd_audio_rtp;
+	int sockfd_audio_rtcp;
+	int sockfd_video_rtp;
+	int sockfd_video_rtcp;
 } janus_source_session;
 static GHashTable *sessions;
 static GList *old_sessions;
 static janus_mutex sessions_mutex;
+static GHashTable *sessions;
+
+
+//function declarations
+void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len);
+void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len);
+int janus_source_close_rtp_rtcp_socket(janus_source_session * session, int video);
+int janus_source_create_rtp_rtcp_socket(janus_source_session * session, int video);
+int janus_source_create_socket(int port);
+void janus_source_close_socket(int * socket_fd);
+
+
+int janus_source_ports_pool_get(void);
+void janus_source_ports_pool_return(int port);
+
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if(!msg || msg == &exit_message)
@@ -386,6 +407,16 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	session->destroyed = 0;
 	g_atomic_int_set(&session->hangingup, 0);
 	handle->plugin_handle = session;
+	if (janus_source_create_rtp_rtcp_socket(session, 1)) {
+		JANUS_LOG(LOG_FATAL, "Unable to create video sockets\n");
+		*error = -3;
+	}
+
+	if (janus_source_create_rtp_rtcp_socket(session, 0)) {
+		JANUS_LOG(LOG_FATAL, "Unable to create audio sockets\n");
+		*error = -4;
+	}
+
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_insert(sessions, handle, session);
 	janus_mutex_unlock(&sessions_mutex);
@@ -405,6 +436,10 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 		return;
 	}
 	JANUS_LOG(LOG_VERB, "Removing Source Plugin session...\n");
+
+	janus_source_close_rtp_rtcp_socket(session, 1);
+	janus_source_close_rtp_rtcp_socket(session, 0);
+
 	janus_mutex_lock(&sessions_mutex);
 	if(!session->destroyed) {
 		session->destroyed = janus_get_monotonic_time();
@@ -430,6 +465,7 @@ char *janus_source_query_session(janus_plugin_session *handle) {
 	json_object_set_new(info, "audio_active", json_string(session->audio_active ? "true" : "false"));
 	json_object_set_new(info, "video_active", json_string(session->video_active ? "true" : "false"));
 	json_object_set_new(info, "bitrate", json_integer(session->bitrate));
+#if 0 //recording
 	if(session->arc || session->vrc) {
 		json_t *recording = json_object();
 		if(session->arc && session->arc->filename)
@@ -438,6 +474,7 @@ char *janus_source_query_session(janus_plugin_session *handle) {
 			json_object_set_new(recording, "video", json_string(session->vrc->filename));
 		json_object_set_new(info, "recording", recording);
 	}
+#endif
 	json_object_set_new(info, "slowlink_count", json_integer(session->slowlink_count));
 	json_object_set_new(info, "destroyed", json_integer(session->destroyed));
 	char *info_text = json_dumps(info, JSON_INDENT(3) | JSON_PRESERVE_ORDER);
@@ -496,7 +533,8 @@ void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *bu
 			/* Save the frame if we're recording */
 			janus_recorder_save_frame(video ? session->vrc : session->arc, buf, len);
 			/* Send the frame back */
-			gateway->relay_rtp(handle, video, buf, len);
+			//gateway->relay_rtp(handle, video, buf, len);
+			janus_source_relay_rtp(session, video, buf, len);
 		}
 	}
 }
@@ -515,7 +553,8 @@ void janus_source_incoming_rtcp(janus_plugin_session *handle, int video, char *b
 			return;
 		if(session->bitrate > 0)
 			janus_rtcp_cap_remb(buf, len, session->bitrate);
-		gateway->relay_rtcp(handle, video, buf, len);
+		//gateway->relay_rtcp(handle, video, buf, len);
+		janus_source_relay_rtcp(session, video, buf, len);
 	}
 }
 
@@ -758,6 +797,7 @@ static void *janus_source_handler(void *data) {
 				/* FIXME How should we handle a subsequent "no limit" bitrate? */
 			}
 		}
+#if 0 //recording is not supported; leaving it for future
 		if(record) {
 			if(msg->sdp) {
 				session->has_audio = (strstr(msg->sdp, "m=audio") != NULL);
@@ -836,6 +876,7 @@ static void *janus_source_handler(void *data) {
 			}
 			janus_mutex_unlock(&session->rec_mutex);
 		}
+#endif //recording
 		/* Any SDP to handle? */
 		if(msg->sdp) {
 			JANUS_LOG(LOG_VERB, "This is involving a negotiation (%s) as well:\n%s\n", msg->sdp_type, msg->sdp);
@@ -928,4 +969,90 @@ error:
 	g_free(error_cause);
 	JANUS_LOG(LOG_VERB, "Leaving SourcePlugin handler thread\n");
 	return NULL;
+}
+
+void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len) {
+	if (video) {
+		JANUS_LOG(LOG_VERB, "Video buffer to relay\n");
+	}
+	else {
+		JANUS_LOG(LOG_VERB, "Audio buffer to relay\n");
+	}
+}
+
+void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len) {
+	if (video) {
+		JANUS_LOG(LOG_VERB, "Video RTCP msg relay\n");
+	}
+	else {
+		JANUS_LOG(LOG_VERB, "Audio RTCP to relay\n");
+	}
+}
+
+int janus_source_create_socket(int port) {
+	return 1;
+}
+
+
+void janus_source_close_socket(int * socket_fd) {
+
+}
+
+
+int janus_source_create_rtp_rtcp_socket(janus_source_session * session, int video) {
+
+	int * sockfd_rtp = video ? &session->sockfd_video_rtp : &session->sockfd_audio_rtp;
+	int * sockfd_rtcp = video ? &session->sockfd_video_rtcp : &session->sockfd_audio_rtcp;
+	int * rtp_port = video ? &session->rtp_port_video : &session->rtp_port_audio;
+	int tries_left = 5;
+
+
+	do {
+		JANUS_LOG(LOG_ERR, "Trying to bind to free port pair\n");
+		int req_rtp_port = janus_source_ports_pool_get();
+		*sockfd_rtp  = janus_source_create_socket(req_rtp_port);
+		*sockfd_rtcp = janus_source_create_socket(req_rtp_port + 1);
+
+		if (*sockfd_rtp != -1 && *sockfd_rtcp != -1) {
+			JANUS_LOG(LOG_ERR, "Bind successfull to ports: %d, %d\n",
+				req_rtp_port,
+				req_rtp_port + 1
+			);
+			*rtp_port = req_rtp_port;
+			return 0;
+		}
+
+		if (*sockfd_rtp != -1)
+			janus_source_close_socket(sockfd_rtp);
+		if (*sockfd_rtcp != -1)
+			janus_source_close_socket(sockfd_rtcp);
+	} while (tries_left-- > 0);
+
+	JANUS_LOG(LOG_ERR, "Unable to bind to RTP and RTCP ports\n");
+	return -1;
+}
+
+int janus_source_close_rtp_rtcp_socket(janus_source_session * session, int video) {
+	int * sockfd_rtp = video ? &session->sockfd_video_rtp : &session->sockfd_audio_rtp;
+	int * sockfd_rtcp = video ? &session->sockfd_video_rtcp : &session->sockfd_audio_rtcp;
+	int * rtp_port = video ? &session->rtp_port_video : &session->rtp_port_audio;
+
+	if (*sockfd_rtp != -1)
+		janus_source_close_socket(sockfd_rtp);
+	if (*sockfd_rtcp != -1)
+		janus_source_close_socket(sockfd_rtcp);
+
+	janus_source_ports_pool_return(*rtp_port);
+
+	return 0;
+}
+
+int janus_source_ports_pool_get(void) {
+	JANUS_LOG(LOG_ERR, "Todo: implement\n");
+	return 4567;
+}
+
+void janus_source_ports_pool_return(int port) {
+	JANUS_LOG(LOG_ERR, "Todo: implement\n");
+	JANUS_LOG(LOG_ERR, "Freeing ports %d\n", port, port + 1);
 }
