@@ -215,7 +215,7 @@ static void janus_source_message_free(janus_source_message *msg) {
 
 
 /* Error codes */
-#define JANUS_SOURCE_ERROR_NO_MESSAGE			411
+#define JANUS_SOURCE_ERROR_NO_MESSAGE		411
 #define JANUS_SOURCE_ERROR_INVALID_JSON		412
 #define JANUS_SOURCE_ERROR_INVALID_ELEMENT	413
 
@@ -291,7 +291,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 
 	GError *error = NULL;
 	/* Start the sessions watchdog */
-	watchdog = g_thread_try_new("etest watchdog", &janus_source_watchdog, NULL, &error);
+	watchdog = g_thread_try_new("source watchdog", &janus_source_watchdog, NULL, &error);
 	if(error != NULL) {
 		g_atomic_int_set(&initialized, 0);
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the SourcePlugin watchdog thread...\n", error->code, error->message ? error->message : "??");
@@ -533,17 +533,7 @@ void janus_source_incoming_data(janus_plugin_session *handle, char *buf, int len
 			return;
 		if(buf == NULL || len <= 0)
 			return;
-		char *text = g_malloc0(len+1);
-		memcpy(text, buf, len);
-		*(text+len) = '\0';
-		JANUS_LOG(LOG_VERB, "Got a DataChannel message (%zu bytes) to bounce back: %s\n", strlen(text), text);
-		/* We send back the same text with a custom prefix */
-		const char *prefix = "Janus SourcePlugin here! You wrote: ";
-		char *reply = g_malloc0(strlen(prefix)+len+1);
-		g_snprintf(reply, strlen(prefix)+len+1, "%s%s", prefix, text);
-		g_free(text);
-		gateway->relay_data(handle, reply, strlen(reply));
-		g_free(reply);
+		JANUS_LOG(LOG_VERB, "Ignoring DataChannel message (%d bytes)\n", len);
 	}
 }
 
