@@ -95,6 +95,7 @@
 #include "../record.h"
 #include "../rtcp.h"
 #include "../utils.h"
+#include <sys/socket.h>
 
 
 /* Plugin information */
@@ -209,7 +210,6 @@ void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf
 int janus_source_close_rtp_rtcp_socket(janus_source_session * session, int video);
 int janus_source_create_rtp_rtcp_socket(janus_source_session * session, int video);
 int janus_source_create_socket(int port);
-void janus_source_close_socket(int * socket_fd);
 
 
 int janus_source_ports_pool_get(void);
@@ -407,15 +407,17 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	session->destroyed = 0;
 	g_atomic_int_set(&session->hangingup, 0);
 	handle->plugin_handle = session;
+
 	if (janus_source_create_rtp_rtcp_socket(session, 1)) {
 		JANUS_LOG(LOG_FATAL, "Unable to create video sockets\n");
 		*error = -3;
 	}
-
+#if 0 //temp: disable audio
 	if (janus_source_create_rtp_rtcp_socket(session, 0)) {
 		JANUS_LOG(LOG_FATAL, "Unable to create audio sockets\n");
 		*error = -4;
 	}
+#endif
 
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_insert(sessions, handle, session);
@@ -972,11 +974,17 @@ error:
 }
 
 void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len) {
-	if (video) {
-		JANUS_LOG(LOG_VERB, "Video buffer to relay\n");
+
+	int * sockfd_rtp = video ? &session->sockfd_video_rtp : &session->sockfd_audio_rtp;
+
+	//temp disable audio
+	if (!video) return;
+
+	if (send(*sockfd_rtp, buf, len, 0) < 0) {
+		JANUS_LOG(LOG_ERR, "Send failed! type: %s\n", video ? "video" : "audio");
 	}
 	else {
-		JANUS_LOG(LOG_VERB, "Audio buffer to relay\n");
+		JANUS_LOG(LOG_ERR, "Send successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
 	}
 }
 
@@ -990,12 +998,26 @@ void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf
 }
 
 int janus_source_create_socket(int port) {
-	return 1;
-}
+	struct sockaddr_in server;
+	int sockfd;
 
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd < 0) {
+		JANUS_LOG(LOG_ERR, "Could not create socket!\n");
+		return -1;
+	}
 
-void janus_source_close_socket(int * socket_fd) {
+	server.sin_addr.s_addr = INADDR_ANY;
+	server.sin_family = AF_INET;
+	server.sin_port = htons(port);
 
+	if (connect(sockfd, (struct sockaddr *)&server, sizeof(server)) < 0) {
+		JANUS_LOG(LOG_ERR, "Bind failed (port=%d)!\n", port);
+		close(sockfd);
+		return -1;
+	}
+
+	return sockfd;
 }
 
 
@@ -1013,7 +1035,7 @@ int janus_source_create_rtp_rtcp_socket(janus_source_session * session, int vide
 		*sockfd_rtp  = janus_source_create_socket(req_rtp_port);
 		*sockfd_rtcp = janus_source_create_socket(req_rtp_port + 1);
 
-		if (*sockfd_rtp != -1 && *sockfd_rtcp != -1) {
+		if (*sockfd_rtp > 0 && *sockfd_rtcp > 0) {
 			JANUS_LOG(LOG_ERR, "Bind successfull to ports: %d, %d\n",
 				req_rtp_port,
 				req_rtp_port + 1
@@ -1022,10 +1044,10 @@ int janus_source_create_rtp_rtcp_socket(janus_source_session * session, int vide
 			return 0;
 		}
 
-		if (*sockfd_rtp != -1)
-			janus_source_close_socket(sockfd_rtp);
-		if (*sockfd_rtcp != -1)
-			janus_source_close_socket(sockfd_rtcp);
+		if (*sockfd_rtp > 0)
+			close(*sockfd_rtp);
+		if (*sockfd_rtcp > 0)
+			close(*sockfd_rtcp);
 	} while (tries_left-- > 0);
 
 	JANUS_LOG(LOG_ERR, "Unable to bind to RTP and RTCP ports\n");
@@ -1037,15 +1059,25 @@ int janus_source_close_rtp_rtcp_socket(janus_source_session * session, int video
 	int * sockfd_rtcp = video ? &session->sockfd_video_rtcp : &session->sockfd_audio_rtcp;
 	int * rtp_port = video ? &session->rtp_port_video : &session->rtp_port_audio;
 
-	if (*sockfd_rtp != -1)
-		janus_source_close_socket(sockfd_rtp);
-	if (*sockfd_rtcp != -1)
-		janus_source_close_socket(sockfd_rtcp);
+	if (*sockfd_rtp > 0)
+		close(*sockfd_rtp);
+	if (*sockfd_rtcp > 0)
+		close(*sockfd_rtcp);
 
 	janus_source_ports_pool_return(*rtp_port);
 
+	*sockfd_rtp = -1;
+	*sockfd_rtcp = -1;
+	*rtp_port = -1;
+
 	return 0;
 }
+
+
+#define PORTS_RANGE_MIN 4000
+#define PORTS_RANGE_MAX 8000
+
+
 
 int janus_source_ports_pool_get(void) {
 	JANUS_LOG(LOG_ERR, "Todo: implement\n");
@@ -1054,5 +1086,5 @@ int janus_source_ports_pool_get(void) {
 
 void janus_source_ports_pool_return(int port) {
 	JANUS_LOG(LOG_ERR, "Todo: implement\n");
-	JANUS_LOG(LOG_ERR, "Freeing ports %d\n", port, port + 1);
+	JANUS_LOG(LOG_ERR, "Freeing ports %d, %d\n", port, port + 1);
 }
