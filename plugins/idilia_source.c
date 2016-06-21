@@ -981,19 +981,25 @@ void janus_source_relay_rtp(janus_source_session *session, int video, char *buf,
 	if (!video) return;
 
 	if (send(*sockfd_rtp, buf, len, 0) < 0) {
-		JANUS_LOG(LOG_ERR, "Send failed! type: %s\n", video ? "video" : "audio");
+		JANUS_LOG(LOG_ERR, "Send RTP failed! type: %s\n", video ? "video" : "audio");
 	}
 	else {
-		JANUS_LOG(LOG_ERR, "Send successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
+		//JANUS_LOG(LOG_ERR, "Send RTP successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
 	}
 }
 
 void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len) {
-	if (video) {
-		JANUS_LOG(LOG_VERB, "Video RTCP msg relay\n");
+
+	int * sockfd_rtcp = video ? &session->sockfd_video_rtcp : &session->sockfd_audio_rtcp;
+
+	//temp disable audio
+	if (!video) return;
+
+	if (send(*sockfd_rtcp, buf, len, 0) < 0) {
+		JANUS_LOG(LOG_ERR, "Send RTCP successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
 	}
 	else {
-		JANUS_LOG(LOG_VERB, "Audio RTCP to relay\n");
+		JANUS_LOG(LOG_ERR, "Send RTCP successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
 	}
 }
 
