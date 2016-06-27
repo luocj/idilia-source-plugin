@@ -202,6 +202,7 @@ typedef struct janus_source_session {
 	int sockfd_video_rtp;
 	int sockfd_video_rtcp;
 	GMainLoop *loop;
+	GThread *rtsp_thread;
 } janus_source_session;
 static GHashTable *sessions;
 static GList *old_sessions;
@@ -219,6 +220,8 @@ int janus_source_create_socket(int port);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
 static gboolean request_key_frame_cb(gpointer data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
+static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data);
+static void janus_source_close_session(janus_source_session * session);
 
 
 int janus_source_ports_pool_get(void);
@@ -356,6 +359,8 @@ void janus_source_destroy(void) {
 		watchdog = NULL;
 	}
 
+	g_hash_table_foreach(sessions, janus_source_close_session_func, NULL);
+
 	/* FIXME We should destroy the sessions cleanly */
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_destroy(sessions);
@@ -416,6 +421,16 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	session->has_video = FALSE;
 	session->audio_active = TRUE;
 	session->video_active = TRUE;
+
+	session->rtp_port_audio = -1;
+	session->rtp_port_video = -1;
+	session->sockfd_audio_rtcp = -1;
+	session->sockfd_audio_rtp = -1;
+	session->sockfd_video_rtcp = -1;
+	session->sockfd_video_rtp = -1;
+	session->loop = NULL;
+	session->rtsp_thread = NULL;
+	
 	janus_mutex_init(&session->rec_mutex);
 	session->bitrate = 0;	/* No limit */
 	session->destroyed = 0;
@@ -437,7 +452,7 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	g_hash_table_insert(sessions, handle, session);
 	janus_mutex_unlock(&sessions_mutex);
 
-	g_thread_try_new("rtsp server", janus_source_rtsp_server_thread, session, &gError);
+	session->rtsp_thread = g_thread_try_new("rtsp server", janus_source_rtsp_server_thread, session, &gError);
 
 	return;
 }
@@ -456,10 +471,7 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 	}
 	JANUS_LOG(LOG_VERB, "Removing Source Plugin session...\n");
 
-	janus_source_close_rtp_rtcp_socket(session, 1);
-	janus_source_close_rtp_rtcp_socket(session, 0);
-
-	g_main_loop_quit(session->loop);
+	janus_source_close_session(session);
 
 	janus_mutex_lock(&sessions_mutex);
 	if (!session->destroyed) {
@@ -1239,4 +1251,23 @@ request_key_frame_cb(gpointer data)
 	gateway->relay_rtcp(session->handle, 1, buf, 12);
 
 	return FALSE;
+}
+
+static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data) {
+
+	janus_source_close_session((janus_source_session *)value);
+}
+
+static void janus_source_close_session(janus_source_session * session) {
+	JANUS_LOG(LOG_ERR, "Closing source session\n");
+
+	janus_source_close_rtp_rtcp_socket(session, 1);
+	janus_source_close_rtp_rtcp_socket(session, 0);
+
+	g_main_loop_quit(session->loop);
+
+	if (session->rtsp_thread != NULL) {
+		g_thread_join(session->rtsp_thread);
+		session->rtsp_thread = NULL;
+	}
 }
