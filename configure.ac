@@ -280,8 +280,8 @@ PKG_CHECK_MODULES([PLUGINS],
                     glib-2.0 >= $glib_version
                     sofia-sip-ua
                     jansson
-					gstreamer-1.0
-					gstreamer-rtsp-server-1.0
+                    gstreamer-1.0
+                    gstreamer-rtsp-server-1.0
                   ])
 
 AC_ARG_ENABLE([plugin-source],
@@ -310,9 +310,7 @@ AS_IF([test "x$enable_post_processing" = "xyes"],
                            libavutil,
                            libavcodec,
                            libavformat,
-                           ogg,
-						   gstreamer-1.0,
-						   gstreamer-rtsp-server-1.0
+                           ogg
                          ])
       ])
 
