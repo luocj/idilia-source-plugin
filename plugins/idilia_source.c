@@ -1184,7 +1184,8 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 	gpointer       data)
 {
 	JANUS_LOG(LOG_INFO, "New client connected\n");
-	g_timeout_add(500, request_key_frame_cb, data);
+	//todo: find better callback for triggering this
+	g_timeout_add(3000, request_key_frame_cb, data);
 
 }
 
