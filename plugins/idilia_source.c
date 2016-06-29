@@ -224,6 +224,7 @@ static void *janus_source_rtsp_server_thread(void *data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
 static gboolean request_key_frame_cb(gpointer data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
+static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
 static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data);
 static void janus_source_close_session(janus_source_session * session);
 static void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len);
@@ -1179,13 +1180,24 @@ media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer
 }
 
 static void
+client_play_request_cb(GstRTSPClient  *gstrtspclient,
+	GstRTSPContext *rtspcontext,
+	gpointer        data)
+{
+	JANUS_LOG(LOG_INFO, "client_play_request_cb\n") ;
+	//todo: find better callback for triggering this
+	g_timeout_add(1000, request_key_frame_cb, data) ;
+}
+
+static void
 client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
 	gpointer       data)
 {
-	JANUS_LOG(LOG_INFO, "New client connected\n");
-	//todo: find better callback for triggering this
-	g_timeout_add(3000, request_key_frame_cb, data);
+	JANUS_LOG(LOG_INFO, "New client connected\n");		
+	
+	g_signal_connect(gstrtspclient, "play-request", (GCallback)client_play_request_cb, data);
+	g_timeout_add(1000, request_key_frame_cb, data);
 
 }
 
@@ -1317,7 +1329,7 @@ request_key_frame_cb(gpointer data)
 		return FALSE;
 	}
 
-	JANUS_LOG(LOG_INFO, "New client connected; sending a PLI to recover video\n");
+	JANUS_LOG(LOG_INFO, "Sending a PLI to recover video\n");
 	char buf[12];
 	memset(buf, 0, 12);
 	janus_rtcp_pli((char *)&buf, 12);
