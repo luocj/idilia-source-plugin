@@ -99,6 +99,7 @@
 
 #include <gst/gst.h>
 #include <gst/rtsp-server/rtsp-server.h>
+#include "ports_pool.h"
 
 
 
@@ -217,7 +218,8 @@ static GHashTable *sessions;
 static GList *old_sessions;
 static janus_mutex sessions_mutex;
 static GHashTable *sessions;
-
+static janus_mutex ports_pool_mutex;
+static ports_pool * pp;
 
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
@@ -231,10 +233,8 @@ static void janus_source_relay_rtp(janus_source_session *session, int video, cha
 static void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len);
 static int janus_source_create_connection(janus_source_duplex_socket * conn);
 static void janus_source_close_connection(janus_source_duplex_socket * conn);
-static gboolean janus_source_create_socket(janus_source_socket * sck, int port, gboolean is_server);
+static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean is_server);
 static void janus_source_close_socket(janus_source_socket * sck);
-static int janus_source_ports_pool_get(void);
-static void janus_source_ports_pool_return(int port);
 
 
 static void janus_source_message_free(janus_source_message *msg) {
@@ -339,6 +339,11 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the SourcePlugin watchdog thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
+	
+	janus_mutex_init(&ports_pool_mutex);
+	//todo: read from config file
+	ports_pool_init(&pp, 4000, 4999);
+	
 	/* Launch the thread that will handle incoming messages */
 	handler_thread = g_thread_try_new("janus source handler", janus_source_handler, NULL, &error);
 	if (error != NULL) {
@@ -369,7 +374,10 @@ void janus_source_destroy(void) {
 	}
 
 	g_hash_table_foreach(sessions, janus_source_close_session_func, NULL);
-
+	janus_mutex_lock(&ports_pool_mutex);
+	ports_pool_free(pp);
+	janus_mutex_unlock(&ports_pool_mutex);
+	
 	/* FIXME We should destroy the sessions cleanly */
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_destroy(sessions);
@@ -1061,15 +1069,13 @@ static void janus_source_relay_rtcp(janus_source_session *session, int video, ch
 
 static int janus_source_create_connection(janus_source_duplex_socket * conn) {
 
-	int port_srv = janus_source_ports_pool_get();
-	if (!janus_source_create_socket(&conn->server, port_srv, TRUE)) {
-		JANUS_LOG(LOG_ERR, "Error binding to port: %d\n", port_srv);
+	if (!janus_source_create_socket(&conn->server, TRUE)) {
+		JANUS_LOG(LOG_ERR, "Error binding\n");
 		return -1;
 	}
 
-	int port_cli = janus_source_ports_pool_get();
-	if (!janus_source_create_socket(&conn->client, port_cli, FALSE)) {
-		JANUS_LOG(LOG_ERR, "Error connecting to port: %d\n", port_cli);
+	if (!janus_source_create_socket(&conn->client, FALSE)) {
+		JANUS_LOG(LOG_ERR, "Error connecting to port\n");
 		return -2;
 	}
 
@@ -1078,16 +1084,21 @@ static int janus_source_create_connection(janus_source_duplex_socket * conn) {
 
 static void janus_source_close_connection(janus_source_duplex_socket * conn) {
 	janus_source_close_socket(&conn->client);
-	janus_source_ports_pool_return(conn->client.port);
 	janus_source_close_socket(&conn->server);
-	janus_source_ports_pool_return(conn->server.port);
+
+	janus_mutex_lock(&ports_pool_mutex);
+	ports_pool_return(pp, conn->client.port);
+	ports_pool_return(pp, conn->server.port);
+	janus_mutex_unlock(&ports_pool_mutex);
 }
 
 
-static gboolean janus_source_create_socket(janus_source_socket * sck, int port, gboolean is_server) {
+static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean is_server) {
 
 	GSocketAddress * address = NULL;
 	gboolean result = FALSE;
+	GError * error;
+	int port = 0;
 
 	sck->socket = g_socket_new(G_SOCKET_FAMILY_IPV4,
 		G_SOCKET_TYPE_DATAGRAM,
@@ -1099,28 +1110,36 @@ static gboolean janus_source_create_socket(janus_source_socket * sck, int port, 
 		JANUS_LOG(LOG_ERR, "Error creating socket\n");
 		return FALSE;
 	}
+	
+	do
+	{
+		janus_mutex_lock(&ports_pool_mutex);
+		port = ports_pool_get(pp, 0);
+		janus_mutex_unlock(&ports_pool_mutex);
+		
+		address = g_inet_socket_address_new_from_string("127.0.0.1", port);
 
-	address = g_inet_socket_address_new_from_string("127.0.0.1", port);
-
-	if (!address) {
-		JANUS_LOG(LOG_ERR, "Error while creating address\n");
-		return FALSE;
-	}
-
-	if (is_server) {
-		result = g_socket_bind(sck->socket, address, TRUE, NULL);
-
-		if (!result) {
-			JANUS_LOG(LOG_ERR, "Bind failed on port: %d\n", port);
+		if (!address) {
+			JANUS_LOG(LOG_ERR, "Error while creating address\n");
+			return FALSE;
 		}
-	}
-	else {
-		result = g_socket_connect(sck->socket, address, NULL, NULL);
 
-		if (!result) {
-			JANUS_LOG(LOG_ERR, "Connect failed on port: %d\n", port);
+		if (is_server) {
+			result = g_socket_bind(sck->socket, address, TRUE, &error);
+
+			if (!result) {
+				JANUS_LOG(LOG_ERR, "Bind failed on port: %d\n", port);
+			}
 		}
-	}
+		else {
+			result = g_socket_connect(sck->socket, address, NULL, NULL);
+
+			if (!result) {
+				JANUS_LOG(LOG_ERR, "Connect failed on port: %d\n", port);
+			}
+		}
+	} while (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_ADDRESS_IN_USE));
+
 
 	if (result == FALSE) {
 		g_socket_close(sck->socket, NULL);
@@ -1139,28 +1158,8 @@ static void janus_source_close_socket(janus_source_socket * sck) {
 		g_socket_close(sck->socket, NULL);
 		g_clear_object(&sck->socket);
 	}
-	sck->port = -1;
 }
 
-#define PORTS_RANGE_MIN 4000
-#define PORTS_RANGE_MAX 8000
-
-
-static int janus_source_ports_pool_get(void) {
-
-	//todo: implement
-	static int ip_poll_address = PORTS_RANGE_MIN;
-	int port = ip_poll_address += 1;
-
-	JANUS_LOG(LOG_INFO, "Allocating port: %d\n", port);
-
-	return port;
-}
-
-static void janus_source_ports_pool_return(int port) {
-	//todo: implement
-	JANUS_LOG(LOG_INFO, "Freeing port %d\n", port);
-}
 
 static void
 media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
