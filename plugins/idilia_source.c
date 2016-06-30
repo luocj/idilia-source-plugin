@@ -188,12 +188,6 @@ typedef struct janus_source_socket {
 	GSocket *socket;
 } janus_source_socket;
 
-typedef struct janus_source_duplex_socket
-{
-	janus_source_socket server;
-	janus_source_socket client;
-} janus_source_duplex_socket;
-
 typedef struct janus_source_session {
 	janus_plugin_session *handle;
 	gboolean has_audio;
@@ -209,10 +203,10 @@ typedef struct janus_source_session {
 	gint64 destroyed;	/* Time at which this session was marked as destroyed */
 	GMainLoop *loop;
 	GThread *rtsp_thread;
-	janus_source_duplex_socket rtp_video;
-	janus_source_duplex_socket rtcp_video;
-	janus_source_duplex_socket rtp_audio;
-	janus_source_duplex_socket rtcp_audio;
+	janus_source_socket rtp_video;
+	janus_source_socket rtcp_video;
+	janus_source_socket rtp_audio;
+	janus_source_socket rtcp_audio;
 } janus_source_session;
 static GHashTable *sessions;
 static GList *old_sessions;
@@ -232,9 +226,7 @@ static void janus_source_close_session_func(gpointer key, gpointer value, gpoint
 static void janus_source_close_session(janus_source_session * session);
 static void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len);
 static void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len);
-static int janus_source_create_connection(janus_source_duplex_socket * conn);
-static void janus_source_close_connection(janus_source_duplex_socket * conn);
-static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean is_server);
+static gboolean janus_source_create_socket(janus_source_socket * sck);
 static void janus_source_close_socket(janus_source_socket * sck);
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
 
@@ -478,22 +470,22 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	g_atomic_int_set(&session->hangingup, 0);
 	handle->plugin_handle = session;
 
-	if (janus_source_create_connection(&session->rtp_video)) {
+	if (!janus_source_create_socket(&session->rtp_video)) {
 		JANUS_LOG(LOG_FATAL, "Unable to create video RTP sockets\n");
 		*error = -3;
 	}
 
-	if (janus_source_create_connection(&session->rtcp_video)) {
+	if (!janus_source_create_socket(&session->rtcp_video)) {
 		JANUS_LOG(LOG_FATAL, "Unable to create video RTCP sockets\n");
 		*error = -4;
 	}
 
-	if (janus_source_create_connection(&session->rtp_audio)) {
+	if (!janus_source_create_socket(&session->rtp_audio)) {
 		JANUS_LOG(LOG_FATAL, "Unable to create audio RTP sockets\n");
 		*error = -5;
 	}
 
-	if (janus_source_create_connection(&session->rtcp_audio)) {
+	if (!janus_source_create_socket(&session->rtcp_audio)) {
 		JANUS_LOG(LOG_FATAL, "Unable to create audio RTCP sockets\n");
 		*error = -6;
 	}
@@ -1062,9 +1054,10 @@ static void *janus_source_handler(void *data) {
 }
 
 void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len) {
-	GSocket * sock_rtp_cli = video ? session->rtp_video.client.socket : session->rtp_audio.client.socket;
+	GSocket * sock_rtp_cli = video ? session->rtp_video.socket : session->rtp_audio.socket;
 
-	g_assert(sock_rtp_cli);
+	if (!sock_rtp_cli)
+		return;
 
 	if (g_socket_send(sock_rtp_cli, buf, len, NULL, NULL) < 0) {
 		//JANUS_LOG(LOG_ERR, "Send RTP failed! type: %s\n", video ? "video" : "audio");
@@ -1077,9 +1070,10 @@ void janus_source_relay_rtp(janus_source_session *session, int video, char *buf,
 
 static void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len) {
 
-	GSocket * sock_rtcp_cli = video ? session->rtcp_video.client.socket : session->rtcp_audio.client.socket;
+	GSocket * sock_rtcp_cli = video ? session->rtcp_video.socket : session->rtcp_audio.socket;
 
-	g_assert(sock_rtcp_cli);
+	if (!sock_rtcp_cli)
+		return;
 
 	if (g_socket_send(sock_rtcp_cli, buf, len, NULL, NULL) < 0) {
 		//JANUS_LOG(LOG_ERR, "Send RTCP failed! type: %s\n", video ? "video" : "audio");
@@ -1090,45 +1084,16 @@ static void janus_source_relay_rtcp(janus_source_session *session, int video, ch
 }
 
 
-
-static int janus_source_create_connection(janus_source_duplex_socket * conn) {
-
-	if (!janus_source_create_socket(&conn->server, TRUE)) {
-		JANUS_LOG(LOG_ERR, "Error binding\n");
-		return -1;
-	}
-
-	if (!janus_source_create_socket(&conn->client, FALSE)) {
-		JANUS_LOG(LOG_ERR, "Error connecting to port\n");
-		return -2;
-	}
-
-	return 0;
-}
-
-static void janus_source_close_connection(janus_source_duplex_socket * conn) {
-	janus_source_close_socket(&conn->client);
-	janus_source_close_socket(&conn->server);
-
-	janus_mutex_lock(&ports_pool_mutex);
-	ports_pool_return(pp, conn->client.port);
-	ports_pool_return(pp, conn->server.port);
-	janus_mutex_unlock(&ports_pool_mutex);
-}
-
-
-static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean is_server) {
+static gboolean janus_source_create_socket(janus_source_socket * sck) {
 
 	GSocketAddress * address = NULL;
 	gboolean result = FALSE;
-	GError * error;
-	int port = 0;
+	int port;
 
 	sck->socket = g_socket_new(G_SOCKET_FAMILY_IPV4,
 		G_SOCKET_TYPE_DATAGRAM,
 		G_SOCKET_PROTOCOL_UDP,
-		NULL
-	);
+		NULL);
 
 	if (!sck->socket) {
 		JANUS_LOG(LOG_ERR, "Error creating socket\n");
@@ -1141,36 +1106,38 @@ static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean i
 		port = ports_pool_get(pp, 0);
 		janus_mutex_unlock(&ports_pool_mutex);
 		
+		if (!port) {
+			JANUS_LOG(LOG_ERR, "No free ports available in ports pool\n");
+			break;
+		}
+		
 		address = g_inet_socket_address_new_from_string("127.0.0.1", port);
 
 		if (!address) {
 			JANUS_LOG(LOG_ERR, "Error while creating address\n");
-			return FALSE;
+			break;
 		}
+	
+		result = g_socket_connect(sck->socket, address, NULL, NULL);
 
-		if (is_server) {
-			result = g_socket_bind(sck->socket, address, TRUE, &error);
-
-			if (!result) {
-				JANUS_LOG(LOG_ERR, "Bind failed on port: %d\n", port);
-			}
+		if (!result) {
+			JANUS_LOG(LOG_ERR, "Connect failed on port: %d\n", port);
 		}
-		else {
-			result = g_socket_connect(sck->socket, address, NULL, NULL);
-
-			if (!result) {
-				JANUS_LOG(LOG_ERR, "Connect failed on port: %d\n", port);
-			}
+		
+		if (!result) {
+			janus_mutex_lock(&ports_pool_mutex);
+			ports_pool_return(pp, port);
+			janus_mutex_unlock(&ports_pool_mutex);
 		}
-	} while (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_ADDRESS_IN_USE));
+	} while (!result);
 
 
-	if (result == FALSE) {
-		g_socket_close(sck->socket, NULL);
-		g_clear_object(&sck->socket);
+	if (!result) {
+		janus_source_close_socket(sck);
 	}
 	else {
 		sck->port = port;
+		g_assert(port);
 	}
 
 	g_clear_object(&address);
@@ -1182,14 +1149,18 @@ static void janus_source_close_socket(janus_source_socket * sck) {
 		g_socket_close(sck->socket, NULL);
 		g_clear_object(&sck->socket);
 	}
+	
+	janus_mutex_lock(&ports_pool_mutex);
+	ports_pool_return(pp, sck->port);
+	janus_mutex_unlock(&ports_pool_mutex);
 }
 
 
 static void
 media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
 {
+	JANUS_LOG(LOG_INFO, "media_configure callback\n");
 #if 0
-	JANUS_LOG(LOG_ERR, "media_configure callback\n");
 	GstElement * pipeline;
 	GstElement *src;
 	gint port;
@@ -1234,11 +1205,6 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	int rtsp_port;
 	janus_source_session *session = (janus_source_session *)data;
 
-	GstElement * bin;
-	GstRTSPUrl *url = NULL;
-	GstRTSPResult res;
-
-
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		JANUS_LOG(LOG_INFO, "Plugin is stopping\n");
 		return FALSE;
@@ -1254,8 +1220,8 @@ static void *janus_source_rtsp_server_thread(void *data) {
 		return FALSE;
 	}
 
-	int port_rtp_video = session->rtp_video.client.port;
-	int port_rtp_audio = session->rtp_audio.client.port;
+	int port_rtp_video = session->rtp_video.port;
+	int port_rtp_audio = session->rtp_audio.port;
 
 	JANUS_LOG(LOG_INFO, "udpsrc RTP video port: %d\n", port_rtp_video);
 	JANUS_LOG(LOG_INFO, "udpsrc RTP audio port: %d\n", port_rtp_audio);
@@ -1291,7 +1257,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	/* media created from this factory can be shared between clients */
 	gst_rtsp_media_factory_set_shared(factory, TRUE);
-
+#if 0
 	res = gst_rtsp_url_parse("rtsp://localhost/camera", &url);
 	g_assert(res == GST_RTSP_OK);
 
@@ -1309,7 +1275,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	g_assert(session->rtp_audio.server.socket);
 	g_object_set(src_audio, "socket", session->rtp_audio.server.socket, NULL);
-
+#endif
 
 	g_signal_connect(factory, "media-configure", (GCallback)media_configure_cb,
 		(gpointer)session);
@@ -1369,8 +1335,10 @@ static void janus_source_close_session_func(gpointer key, gpointer value, gpoint
 static void janus_source_close_session(janus_source_session * session) {
 	JANUS_LOG(LOG_INFO, "Closing source session\n");
 
-	janus_source_close_connection(&session->rtp_video);
-	janus_source_close_connection(&session->rtcp_video);
+	janus_source_close_socket(&session->rtp_video);
+	janus_source_close_socket(&session->rtcp_video);
+	janus_source_close_socket(&session->rtp_audio);
+	janus_source_close_socket(&session->rtcp_audio);
 
 	g_main_loop_quit(session->loop);
 
