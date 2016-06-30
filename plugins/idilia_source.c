@@ -229,6 +229,10 @@ static void janus_source_relay_rtcp(janus_source_session *session, int video, ch
 static gboolean janus_source_create_socket(janus_source_socket * sck);
 static void janus_source_close_socket(janus_source_socket * sck);
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
+static void rtsp_media_new_state_cb(GstRTSPMedia *gstrtspmedia, gint arg1, gpointer user_data);
+static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
+static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
+
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -1156,20 +1160,27 @@ static void janus_source_close_socket(janus_source_socket * sck) {
 }
 
 
-static void
-media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
+static void rtsp_media_new_state_cb(GstRTSPMedia *gstrtspmedia, gint arg1, gpointer user_data)
+{ 
+	//todo: remove
+	JANUS_LOG(LOG_INFO, "rtsp_media_new_state_cb: %d\n", (GstState)arg1);
+}
+
+static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
 {
-	JANUS_LOG(LOG_INFO, "media_configure callback\n");
+	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
+	
+	g_signal_connect(media, "new-state", (GCallback)rtsp_media_new_state_cb, data);
 #if 0
-	GstElement * pipeline;
-	GstElement *src;
-	gint port;
+	GstElement * pipeline ;
+	GstElement *src ;
+	gint port ;
 
-	pipeline = gst_rtsp_media_get_element(media);
+	pipeline = gst_rtsp_media_get_element(media) ;
 
-	src = gst_bin_get_by_name(GST_BIN(pipeline), "udp_rtp_src_video");
-	g_object_get(src, "port", &port, NULL);
-	g_print("Read udp port: %d\n", port);
+	src = gst_bin_get_by_name(GST_BIN(pipeline), "udp_rtp_src_video") ;
+	g_object_get(src, "port", &port, NULL) ;
+	g_print("Read udp port: %d\n", port) ;
 #endif
 }
 
@@ -1195,12 +1206,20 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 
 }
 
+static GstRTSPFilterResult
+janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data) { 
+	JANUS_LOG(LOG_INFO, "Removing RTSP session: %s\n", gst_rtsp_session_get_sessionid(session));
+	return GST_RTSP_FILTER_REMOVE;	
+}
+
 static void *janus_source_rtsp_server_thread(void *data) {
 
 	GMainLoop *loop;
 	GstRTSPServer *server;
 	GstRTSPMountPoints *mounts;
 	GstRTSPMediaFactory *factory;
+	GstRTSPSessionPool *session_pool;
+	GList * sessions_list;
 	gchar * launch_pipe;
 	int rtsp_port;
 	janus_source_session *session = (janus_source_session *)data;
@@ -1293,9 +1312,14 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	JANUS_LOG(LOG_INFO, "Stream ready at rtsp://127.0.0.1:%d/camera\n", rtsp_port);
 
 	g_main_loop_run(loop);
-	JANUS_LOG(LOG_INFO, "Freeing RTSP server\n");
+	
+	session_pool = gst_rtsp_server_get_session_pool(server);
+	sessions_list = gst_rtsp_session_pool_filter(session_pool, janus_source_close_rtsp_sessions, NULL);
+	g_list_free_full(sessions_list, gst_object_unref);
+	g_object_unref(session_pool);
 
 error:
+	JANUS_LOG(LOG_INFO, "Freeing RTSP server\n");
 	g_object_unref(server);
 	g_main_loop_unref(loop);
 	session->loop = NULL;
