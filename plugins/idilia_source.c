@@ -1269,10 +1269,9 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	factory = gst_rtsp_media_factory_new();
 
 	/* todo: use SDP to dynamically recognize content type */
-	/* todo: fix negotiation issue -> get rid of opus transcoding */
 	launch_pipe = g_strdup_printf(
 		"( udpsrc port=%d name=udp_rtp_src_video caps=\"application/x-rtp, media=video, payload=96,  encoding-name=VP8\"  ! rtpvp8depay  ! rtpvp8pay pt=96 name=pay0 "
-		"  udpsrc port=%d name=udp_rtp_src_audio caps=\"application/x-rtp, media=audio, payload=127, encoding-name=OPUS\" ! rtpopusdepay ! opusdec ! opusenc ! rtpopuspay pt=127 name=pay1 )",
+		"  udpsrc port=%d name=udp_rtp_src_audio caps=\"application/x-rtp, media=audio, payload=127, encoding-name=OPUS\" ! rtpopusdepay ! audio/x-opus, channels=1 ! rtpopuspay pt=127 name=pay1 )",
 		port_rtp_video,
 		port_rtp_audio
 	);
