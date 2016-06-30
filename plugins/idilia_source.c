@@ -441,7 +441,6 @@ const char *janus_source_get_package(void) {
 }
 
 void janus_source_create_session(janus_plugin_session *handle, int *error) {
-	GError *gError = NULL;
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		*error = -1;
@@ -497,8 +496,6 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_insert(sessions, handle, session);
 	janus_mutex_unlock(&sessions_mutex);
-
-	session->rtsp_thread = g_thread_try_new("rtsp server", janus_source_rtsp_server_thread, session, &gError);
 
 	return;
 }
@@ -593,6 +590,14 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 		return;
 	g_atomic_int_set(&session->hangingup, 0);
 	/* We really don't care, as we only send RTP/RTCP we get in the first place back anyway */
+	
+	JANUS_LOG(LOG_ERR, "janus_source_setup_media: video_active: %d, audio_active: %d, has_video: %d, has_audio: %d\n", session->video_active, session->audio_active, session->has_video, session->has_audio);
+
+	session->rtsp_thread = g_thread_try_new("rtsp server", janus_source_rtsp_server_thread, session, NULL); 
+	if (!session->rtsp_thread) {
+		JANUS_LOG(LOG_ERR, "RTSP thread creation failure\n");
+	}
+	
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -1220,7 +1225,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	GstRTSPMediaFactory *factory;
 	GstRTSPSessionPool *session_pool;
 	GList * sessions_list;
-	gchar * launch_pipe;
+	gchar * launch_pipe = NULL;
 	int rtsp_port;
 	janus_source_session *session = (janus_source_session *)data;
 
@@ -1261,15 +1266,28 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	}
 
 	factory = gst_rtsp_media_factory_new();
-
+	
 	/* todo: use SDP to dynamically recognize content type */
-	launch_pipe = g_strdup_printf(
-		"( udpsrc port=%d name=udp_rtp_src_video caps=\"application/x-rtp, media=video, payload=96,  encoding-name=VP8\"  ! rtpvp8depay  ! rtpvp8pay pt=96 name=pay0 "
-		"  udpsrc port=%d name=udp_rtp_src_audio caps=\"application/x-rtp, media=audio, payload=127, encoding-name=OPUS\" ! rtpopusdepay ! audio/x-opus, channels=1 ! rtpopuspay pt=127 name=pay1 )",
-		port_rtp_video,
-		port_rtp_audio
-	);
-
+	if (session->has_video && session->has_audio)
+	{
+		launch_pipe = g_strdup_printf(
+			"( udpsrc port=%d name=udp_rtp_src_video caps=\"application/x-rtp, media=video, encoding-name=VP8\"  ! rtpvp8depay  ! rtpvp8pay pt=96 name=pay0 "
+			"  udpsrc port=%d name=udp_rtp_src_audio caps=\"application/x-rtp, media=audio, encoding-name=OPUS\" ! rtpopusdepay ! audio/x-opus, channels=1 ! rtpopuspay pt=127 name=pay1 )",
+			port_rtp_video,
+			port_rtp_audio);
+	}
+	else if (session->has_video && !session->has_audio)
+	{
+		launch_pipe = g_strdup_printf("( udpsrc port=%d name=udp_rtp_src_video caps=\"application/x-rtp, media=video, encoding-name=VP8\"  ! rtpvp8depay  ! rtpvp8pay pt=96 name=pay0 )",
+			port_rtp_video);
+	}
+	else if (!session->has_video && session->has_audio)
+	{
+		launch_pipe = g_strdup_printf(
+			"( udpsrc port=%d name=udp_rtp_src_audio caps=\"application/x-rtp, media=audio, encoding-name=OPUS\" ! rtpopusdepay ! audio/x-opus, channels=1 ! rtpopuspay pt=127 name=pay0 )",
+			port_rtp_audio);
+	}
+	
 	gst_rtsp_media_factory_set_launch(factory, launch_pipe);
 	g_free(launch_pipe);
 
