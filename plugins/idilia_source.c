@@ -100,7 +100,7 @@
 #include <gst/gst.h>
 #include <gst/rtsp-server/rtsp-server.h>
 #include "ports_pool.h"
-
+#include "node_service_access.h"
 
 
 /* Plugin information */
@@ -215,6 +215,8 @@ static GHashTable *sessions;
 static janus_mutex ports_pool_mutex;
 static ports_pool * pp;
 static uint16_t udp_min_port = 0, udp_max_port = 0;
+static CURL *curl_handle = NULL;
+static gchar *status_service_url = NULL;
 
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
@@ -232,7 +234,7 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 static void rtsp_media_new_state_cb(GstRTSPMedia *gstrtspmedia, gint arg1, gpointer user_data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
-
+static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -331,7 +333,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			}
 			JANUS_LOG(LOG_VERB, "Parsing category '%s'\n", cat->name);
 			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
-
+			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
 			cl = cl->next;
 		}
 		janus_config_destroy(config);
@@ -1252,6 +1254,10 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	server = gst_rtsp_server_new();
 
+	gchar *publicIp = janus_get_public_ip();
+	
+	gst_rtsp_server_set_address (server,publicIp);
+
 	/* Allocate random port */
 	gst_rtsp_server_set_service(server, "0");
 
@@ -1325,9 +1331,20 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	/* attach the session to the "/camera" URL */
 	gst_rtsp_mount_points_add_factory(mounts, "/camera", factory);
 	g_object_unref(mounts);
+	
 
+	gchar * rtsp_ip = gst_rtsp_server_get_address (server);
 	rtsp_port = gst_rtsp_server_get_bound_port(server);
-	JANUS_LOG(LOG_INFO, "Stream ready at rtsp://127.0.0.1:%d/camera\n", rtsp_port);
+
+	gchar *request = g_strdup_printf("rtsp://%s:%d/camera",rtsp_ip,rtsp_port);
+	
+	g_printf("\n\n\n status_service_url %s %s\n\n",status_service_url,request);
+	gboolean retCode =  curl_request(curl_handle,status_service_url,request);
+	if(retCode != TRUE){
+	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
+	}
+
+	JANUS_LOG(LOG_INFO, "Stream ready at %s\n",request);
 
 	g_main_loop_run(loop);
 	
@@ -1415,3 +1432,11 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 		JANUS_LOG(LOG_INFO, "UDP port range: %u - %u\n", *min_port, *max_port);
 	}
 }
+
+
+static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url) {
+    if(config_url && config_url->value){ 
+	*url = g_strdup(config_url->value);
+    }
+}
+
