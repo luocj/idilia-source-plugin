@@ -1338,7 +1338,6 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	gchar *request = g_strdup_printf("rtsp://%s:%d/camera",rtsp_ip,rtsp_port);
 	
-	g_printf("\n\n\n status_service_url %s %s\n\n",status_service_url,request);
 	gboolean retCode =  curl_request(curl_handle,status_service_url,request);
 	if(retCode != TRUE){
 	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
