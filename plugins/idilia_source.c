@@ -220,6 +220,7 @@ static janus_mutex sessions_mutex;
 static GHashTable *sessions;
 static janus_mutex ports_pool_mutex;
 static ports_pool * pp;
+static uint16_t udp_min_port = 0, udp_max_port = 0;
 
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
@@ -235,7 +236,7 @@ static int janus_source_create_connection(janus_source_duplex_socket * conn);
 static void janus_source_close_connection(janus_source_duplex_socket * conn);
 static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean is_server);
 static void janus_source_close_socket(janus_source_socket * sck);
-
+static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -301,7 +302,6 @@ void *janus_source_watchdog(void *data) {
 	return NULL;
 }
 
-
 /* Plugin implementation */
 int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	if (g_atomic_int_get(&stopping)) {
@@ -320,9 +320,33 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	janus_config *config = janus_config_parse(filename);
 	if (config != NULL)
 		janus_config_print(config);
-	/* This plugin actually has nothing to configure... */
-	janus_config_destroy(config);
-	config = NULL;
+
+	/* Parse configuration */
+	if (config != NULL)
+	{
+		GList *cl = janus_config_get_categories(config);
+		while (cl != NULL)
+		{
+			janus_config_category *cat = (janus_config_category *)cl->data;
+			if (cat->name == NULL)
+			{
+				cl = cl->next;
+				continue;
+			}
+			JANUS_LOG(LOG_VERB, "Parsing category '%s'\n", cat->name);
+			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
+
+			cl = cl->next;
+		}
+		janus_config_destroy(config);
+		config = NULL;
+	}
+
+	if (udp_min_port <= 0 || udp_max_port <= 0) {
+		udp_min_port = 4000;
+		udp_max_port = 5000;
+		JANUS_LOG(LOG_ERR, "Using default port range: %d-%d\n", udp_min_port, udp_max_port);
+	}
 
 	sessions = g_hash_table_new(NULL, NULL);
 	janus_mutex_init(&sessions_mutex);
@@ -339,10 +363,12 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the SourcePlugin watchdog thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
+
+	gst_init(NULL, NULL);
 	
 	janus_mutex_init(&ports_pool_mutex);
 	//todo: read from config file
-	ports_pool_init(&pp, 4000, 4999);
+	ports_pool_init(&pp, udp_min_port, udp_max_port);
 	
 	/* Launch the thread that will handle incoming messages */
 	handler_thread = g_thread_try_new("janus source handler", janus_source_handler, NULL, &error);
@@ -351,8 +377,6 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the Source handler thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
-
-	gst_init(NULL, NULL);
 
 	JANUS_LOG(LOG_INFO, "%s initialized!\n", JANUS_SOURCE_NAME);
 	return 0;
@@ -1353,5 +1377,32 @@ static void janus_source_close_session(janus_source_session * session) {
 	if (session->rtsp_thread != NULL) {
 		g_thread_join(session->rtsp_thread);
 		session->rtsp_thread = NULL;
+	}
+}
+
+static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t *min_port, uint16_t * max_port)
+{
+	if (ports_range && ports_range->value)
+	{
+		/* Split in min and max port */
+		char *maxport = strrchr(ports_range->value, '-');
+		if (maxport != NULL)
+		{
+			*maxport = '\0';
+			maxport++;
+			*min_port = atoi(ports_range->value);
+			*max_port = atoi(maxport);
+			maxport--;
+			*maxport = '-';
+		}
+		if (*min_port > *max_port)
+		{
+			int temp_port = *min_port;
+			*min_port = *max_port;
+			*max_port = temp_port;
+		}
+		if (*max_port == 0)
+			*max_port = 65535;
+		JANUS_LOG(LOG_INFO, "UDP port range: %u - %u\n", *min_port, *max_port);
 	}
 }
