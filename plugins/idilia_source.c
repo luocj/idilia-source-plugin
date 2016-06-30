@@ -376,6 +376,8 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		return -1;
 	}
 
+	curl_handle = curl_init(); 
+
 	JANUS_LOG(LOG_INFO, "%s initialized!\n", JANUS_SOURCE_NAME);
 	return 0;
 }
@@ -407,6 +409,8 @@ void janus_source_destroy(void) {
 	g_async_queue_unref(messages);
 	messages = NULL;
 	sessions = NULL;
+	
+	curl_cleanup(curl_handle);
 
 	g_atomic_int_set(&initialized, 0);
 	g_atomic_int_set(&stopping, 0);
@@ -1338,6 +1342,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	gchar *request = g_strdup_printf("rtsp://%s:%d/camera",rtsp_ip,rtsp_port);
 	
+	g_printf("\n\n\n\n\n\n\n %s %s\n\n\n",status_service_url,request);
 	gboolean retCode =  curl_request(curl_handle,status_service_url,request);
 	if(retCode != TRUE){
 	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
