@@ -367,6 +367,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	}
 
 	gst_init(NULL, NULL);
+	curl_handle = curl_init();
 	
 	janus_mutex_init(&ports_pool_mutex);
 	//todo: read from config file
@@ -414,10 +415,12 @@ void janus_source_destroy(void) {
 	messages = NULL;
 	sessions = NULL;
 	
-        /* Free configuration fields */
-        if (status_service_url) {
-            g_free(status_service_url);
-        }
+    /* Free configuration fields */
+    if (status_service_url) {
+        g_free(status_service_url);
+    }
+
+	curl_cleanup(curl_handle);
 
 	g_atomic_int_set(&initialized, 0);
 	g_atomic_int_set(&stopping, 0);
@@ -510,7 +513,7 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	g_hash_table_insert(sessions, handle, session);
 	janus_mutex_unlock(&sessions_mutex);
 
-	curl_handle = curl_init();
+
 
 	return;
 }
@@ -525,8 +528,6 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
         if(retCode != TRUE){
             JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
         }
-
-	curl_cleanup(curl_handle);
 
 
 	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
