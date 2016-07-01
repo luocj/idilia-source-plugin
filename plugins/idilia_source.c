@@ -87,7 +87,6 @@
 #include "plugin.h"
 
 #include <jansson.h>
-
 #include "../debug.h"
 #include "../apierror.h"
 #include "../config.h"
@@ -214,8 +213,10 @@ static janus_mutex sessions_mutex;
 static GHashTable *sessions;
 static janus_mutex ports_pool_mutex;
 static ports_pool * pp;
-static uint16_t udp_min_port = 0, udp_max_port = 0;
 static CURL *curl_handle = NULL;
+
+/* configuration options */
+static uint16_t udp_min_port = 0, udp_max_port = 0;
 static gchar *status_service_url = NULL;
 
 //function declarations
@@ -235,6 +236,10 @@ static void rtsp_media_new_state_cb(GstRTSPMedia *gstrtspmedia, gint arg1, gpoin
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
+
+/* External declarations (janus.h) */
+gchar *janus_get_local_ip(void);
+gchar *janus_get_public_ip(void);
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -411,6 +416,11 @@ void janus_source_destroy(void) {
 	sessions = NULL;
 	
 	curl_cleanup(curl_handle);
+	
+	/* Free configuration fields */
+	if (status_service_url) {
+		g_free(status_service_url);
+	}
 
 	g_atomic_int_set(&initialized, 0);
 	g_atomic_int_set(&stopping, 0);
@@ -1258,10 +1268,8 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	server = gst_rtsp_server_new();
 
-	gchar *publicIp = janus_get_public_ip();
+	gst_rtsp_server_set_address(server, janus_get_public_ip());
 	
-	gst_rtsp_server_set_address (server,publicIp);
-
 	/* Allocate random port */
 	gst_rtsp_server_set_service(server, "0");
 
@@ -1340,15 +1348,17 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	gchar * rtsp_ip = gst_rtsp_server_get_address (server);
 	rtsp_port = gst_rtsp_server_get_bound_port(server);
 
-	gchar *request = g_strdup_printf("rtsp://%s:%d/camera",rtsp_ip,rtsp_port);
+	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", rtsp_ip, rtsp_port);
 	
-	g_printf("\n\n\n\n\n\n\n %s %s\n\n\n",status_service_url,request);
-	gboolean retCode =  curl_request(curl_handle,status_service_url,request);
+	g_printf("\n\n\n\n\n\n\n %s %s\n\n\n", status_service_url, rtsp_url);
+	gboolean retCode = curl_request(curl_handle, status_service_url, rtsp_url);
 	if(retCode != TRUE){
 	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
 	}
 
-	JANUS_LOG(LOG_INFO, "Stream ready at %s\n",request);
+	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", rtsp_url);
+	g_free(rtsp_url);
+	g_free(rtsp_ip);
 
 	g_main_loop_run(loop);
 	
