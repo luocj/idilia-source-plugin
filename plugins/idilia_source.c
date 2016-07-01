@@ -218,7 +218,6 @@ static CURL *curl_handle = NULL;
 /* configuration options */
 static uint16_t udp_min_port = 0, udp_max_port = 0;
 static gchar *status_service_url = NULL;
-
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
@@ -238,8 +237,8 @@ static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
 
 /* External declarations (janus.h) */
-gchar *janus_get_local_ip(void);
-gchar *janus_get_public_ip(void);
+extern gchar *janus_get_local_ip(void);
+extern gchar *janus_get_public_ip(void);
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -381,11 +380,11 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		return -1;
 	}
 
-	curl_handle = curl_init(); 
 
 	JANUS_LOG(LOG_INFO, "%s initialized!\n", JANUS_SOURCE_NAME);
 	return 0;
 }
+
 
 void janus_source_destroy(void) {
 	if (!g_atomic_int_get(&initialized))
@@ -415,12 +414,10 @@ void janus_source_destroy(void) {
 	messages = NULL;
 	sessions = NULL;
 	
-	curl_cleanup(curl_handle);
-	
-	/* Free configuration fields */
-	if (status_service_url) {
-		g_free(status_service_url);
-	}
+        /* Free configuration fields */
+        if (status_service_url) {
+            g_free(status_service_url);
+        }
 
 	g_atomic_int_set(&initialized, 0);
 	g_atomic_int_set(&stopping, 0);
@@ -513,6 +510,8 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	g_hash_table_insert(sessions, handle, session);
 	janus_mutex_unlock(&sessions_mutex);
 
+	curl_handle = curl_init();
+
 	return;
 }
 
@@ -521,6 +520,14 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 		*error = -1;
 		return;
 	}
+
+	gboolean retCode = curl_request(curl_handle,g_strdup_printf("%s/%s",status_service_url,g_strdup(get_source_id())),"{}","DELETE");
+        if(retCode != TRUE){
+            JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
+        }
+
+	curl_cleanup(curl_handle);
+
 
 	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
 	if (!session) {
@@ -1243,7 +1250,11 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	GList * sessions_list;
 	gchar * launch_pipe = NULL;
 	int rtsp_port;
+
+	const gchar *http_post = g_strdup("POST");
 	janus_source_session *session = (janus_source_session *)data;
+    
+
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		JANUS_LOG(LOG_INFO, "Plugin is stopping\n");
@@ -1349,12 +1360,14 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	rtsp_port = gst_rtsp_server_get_bound_port(server);
 
 	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", rtsp_ip, rtsp_port);
-	
-	g_printf("\n\n\n\n\n\n\n %s %s\n\n\n", status_service_url, rtsp_url);
-	gboolean retCode = curl_request(curl_handle, status_service_url, rtsp_url);
+	g_printf("before %s %s %s ", status_service_url,rtsp_url,http_post);
+	gboolean retCode = curl_request(curl_handle, status_service_url, rtsp_url,http_post);
 	if(retCode != TRUE){
 	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
 	}
+	
+	g_printf("\n\n\nsource id = %s\n\n ", get_source_id());
+
 
 	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", rtsp_url);
 	g_free(rtsp_url);
