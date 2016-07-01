@@ -1,6 +1,5 @@
 #include "node_service_access.h"
 
-static gchar * db_entry_id = NULL;
 
 CURL *curl_init(void) {
     return curl_easy_init();
@@ -17,33 +16,25 @@ gchar *create_json(const gchar *url) {
 }
 
 
-gchar* get_source_id(void) {
-    return db_entry_id;
-}
-
-
-void set_source_id(const gchar* ptr) {
-    
-    json_error_t error;
-    json_t * object = NULL;
-
-    object = json_loads(ptr, 0, &error);
- 
-    db_entry_id = g_strdup(json_string_value(json_object_get(object,"_id")));
- 
-    json_decref(object);
-}
-
 
 static size_t curl_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    	
-    set_source_id(ptr);
+ 
+    if(userdata != NULL) { 
+	json_error_t error;
+        json_t * object = NULL;
+
+        object = json_loads(ptr, 0, &error);
+
+        *((gchar**) userdata) = (gchar *) g_strdup(json_string_value(json_object_get(object,"_id")));
+       
+        json_decref(object);
+    }
 
     return size*nmemb;
 }
 
 
-gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, const gchar *requestType) {
+gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, const gchar *requestType, gchar ** db_entry_id, gboolean ispost) {
 
     CURLcode curl_code = CURLE_OK;
     struct curl_slist *headers = NULL;
@@ -75,6 +66,13 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
     curl_code = curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION,curl_callback);
     if (CURLE_OK != curl_code) {
         retValue = FALSE;
+    }
+
+    if(ispost == TRUE ) {
+	curl_code = curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA,(void *) db_entry_id);
+        if (CURLE_OK != curl_code) {
+            retValue = FALSE;
+        }
     }
 
 
