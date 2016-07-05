@@ -417,16 +417,11 @@ void janus_source_destroy(void) {
 	messages = NULL;
 	sessions = NULL;
 	
-
-        /* Free configuration fields */
-        if (status_service_url) {
-            g_free(status_service_url);
-        }
     /* Free configuration fields */
     if (status_service_url) {
         g_free(status_service_url);
+		status_service_url = NULL;
     }
-
 	curl_cleanup(curl_handle);
 
 	g_atomic_int_set(&initialized, 0);
@@ -1305,6 +1300,8 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	}
 
 	factory = gst_rtsp_media_factory_new();
+
+	gst_rtsp_media_factory_set_latency(factory, 0);
 	
 	/* todo: use SDP to dynamically recognize content type */
 	if (session->has_video && session->has_audio)
@@ -1332,7 +1329,14 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	/* media created from this factory can be shared between clients */
 	gst_rtsp_media_factory_set_shared(factory, TRUE);
+
+
 #if 0
+	GstRTSPUrl *url = NULL;
+	GstElement * bin = NULL;
+	GstRTSPResult res;
+
+	//reduce buffer size of UDPSRC
 	res = gst_rtsp_url_parse("rtsp://localhost/camera", &url);
 	g_assert(res == GST_RTSP_OK);
 
@@ -1341,15 +1345,12 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	GstElement * src_video = gst_bin_get_by_name(GST_BIN(bin), "udp_rtp_src_video");
 	g_assert(src_video);
-
-	g_assert(session->rtp_video.server.socket);
-	g_object_set(src_video, "socket", session->rtp_video.server.socket, NULL);
+	g_object_set(src_video, "buffer-size", 2048, NULL);
 
 	GstElement * src_audio = gst_bin_get_by_name(GST_BIN(bin), "udp_rtp_src_audio");
 	g_assert(src_audio);
+	g_object_set(src_audio, "buffer-size", 2048, NULL);
 
-	g_assert(session->rtp_audio.server.socket);
-	g_object_set(src_audio, "socket", session->rtp_audio.server.socket, NULL);
 #endif
 
 	g_signal_connect(factory, "media-configure", (GCallback)media_configure_cb,
