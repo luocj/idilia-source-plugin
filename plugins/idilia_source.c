@@ -207,6 +207,7 @@ typedef struct janus_source_session {
 	janus_source_socket rtp_audio;
 	janus_source_socket rtcp_audio;
 	gchar * db_entry_session_id;
+	gint periodic_pli;
 } janus_source_session;
 static GHashTable *sessions;
 static GList *old_sessions;
@@ -222,7 +223,9 @@ static gchar *status_service_url = NULL;
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
+static void janus_source_request_keyframe(janus_source_session *session);
 static gboolean request_key_frame_cb(gpointer data);
+static gboolean request_key_frame_periodic_cb(gpointer data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
 static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data);
@@ -484,6 +487,7 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 
 	session->loop = NULL;
 	session->rtsp_thread = NULL;
+	session->periodic_pli = 0;
 
 	janus_mutex_init(&session->rec_mutex);
 	session->bitrate = 0;	/* No limit */
@@ -625,7 +629,8 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 	if (!session->rtsp_thread) {
 		JANUS_LOG(LOG_ERR, "RTSP thread creation failure\n");
 	}
-	
+
+	session->periodic_pli = g_timeout_add(5000, request_key_frame_periodic_cb, (gpointer)session);
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -1393,28 +1398,37 @@ error:
 	return NULL;
 }
 
-static gboolean
-request_key_frame_cb(gpointer data)
+static void janus_source_request_keyframe(janus_source_session *session)
 {
-	janus_source_session *session = (janus_source_session *)data;
-
 	if (!session) {
 		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
-		return FALSE;
+		return;
 	}
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
 		JANUS_LOG(LOG_INFO, "Keyframe generation event while plugin or session is stopping\n");
-		return FALSE;
+		return;
 	}
 
-	JANUS_LOG(LOG_INFO, "Sending a PLI to recover video\n");
+	JANUS_LOG(LOG_INFO, "Sending a PLI to request keyframe\n");
 	char buf[12];
 	memset(buf, 0, 12);
 	janus_rtcp_pli((char *)&buf, 12);
 	gateway->relay_rtcp(session->handle, 1, buf, 12);
+}
 
+static gboolean
+request_key_frame_cb(gpointer data)
+{
+	janus_source_request_keyframe((janus_source_session *)data);
 	return FALSE;
+}
+
+static gboolean
+request_key_frame_periodic_cb(gpointer data)
+{
+	janus_source_request_keyframe((janus_source_session *)data);
+	return TRUE;
 }
 
 static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data) {
@@ -1431,6 +1445,10 @@ static void janus_source_close_session(janus_source_session * session) {
 	janus_source_close_socket(&session->rtcp_video);
 	janus_source_close_socket(&session->rtp_audio);
 	janus_source_close_socket(&session->rtcp_audio);
+
+	if (session->periodic_pli) {
+		g_source_remove(session->periodic_pli);
+	}
 
 	if (session->loop) {
 		g_main_loop_quit(session->loop);
