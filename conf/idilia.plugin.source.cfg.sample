@@ -1,1 +1,5 @@
+[general]
+udp_port_range = 50000-55000
 
+[status-service]
+status_service_url = http://localhost:4000/api/cams
