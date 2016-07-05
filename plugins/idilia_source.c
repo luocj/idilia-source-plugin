@@ -1289,7 +1289,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	server = gst_rtsp_server_new();
 
-	gst_rtsp_server_set_address(server, janus_get_public_ip());
+	gst_rtsp_server_set_address(server, janus_get_local_ip());
 	
 	/* Allocate random port */
 	gst_rtsp_server_set_service(server, "0");
@@ -1365,22 +1365,17 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	gst_rtsp_mount_points_add_factory(mounts, "/camera", factory);
 	g_object_unref(mounts);
 	
-
-	gchar * rtsp_ip = gst_rtsp_server_get_address (server);
 	rtsp_port = gst_rtsp_server_get_bound_port(server);
 
-	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", rtsp_ip, rtsp_port);
+	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", janus_get_public_ip(), rtsp_port);
 	
 	gboolean retCode = curl_request(curl_handle, status_service_url,rtsp_url,http_post,&(session->db_entry_session_id),TRUE);
 	if(retCode != TRUE){
 	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
 	}
 	
-
-
 	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", rtsp_url);
 	g_free(rtsp_url);
-	g_free(rtsp_ip);
 
 	g_main_loop_run(loop);
 	
@@ -1423,7 +1418,9 @@ request_key_frame_cb(gpointer data)
 
 static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data) {
 
-	janus_source_close_session((janus_source_session *)value);
+	if (value != NULL) {
+		janus_source_close_session((janus_source_session *)value);
+	}
 }
 
 static void janus_source_close_session(janus_source_session * session) {
@@ -1434,7 +1431,9 @@ static void janus_source_close_session(janus_source_session * session) {
 	janus_source_close_socket(&session->rtp_audio);
 	janus_source_close_socket(&session->rtcp_audio);
 
-	g_main_loop_quit(session->loop);
+	if (session->loop) {
+		g_main_loop_quit(session->loop);
+	}
 
 	if (session->rtsp_thread != NULL) {
 		g_thread_join(session->rtsp_thread);
