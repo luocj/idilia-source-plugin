@@ -623,7 +623,8 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 	g_atomic_int_set(&session->hangingup, 0);
 	/* We really don't care, as we only send RTP/RTCP we get in the first place back anyway */
 	
-	JANUS_LOG(LOG_ERR, "janus_source_setup_media: video_active: %d, audio_active: %d, has_video: %d, has_audio: %d\n", session->video_active, session->audio_active, session->has_video, session->has_audio);
+	JANUS_LOG(LOG_VERB, "video_active: %d, audio_active: %d, has_video: %d, has_audio: %d\n", 
+		session->video_active, session->audio_active, session->has_video, session->has_audio);
 
 	session->rtsp_thread = g_thread_try_new("rtsp server", janus_source_rtsp_server_thread, session, NULL); 
 	if (!session->rtsp_thread) {
@@ -1284,8 +1285,8 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	int port_rtp_video = session->rtp_video.port;
 	int port_rtp_audio = session->rtp_audio.port;
 
-	JANUS_LOG(LOG_INFO, "udpsrc RTP video port: %d\n", port_rtp_video);
-	JANUS_LOG(LOG_INFO, "udpsrc RTP audio port: %d\n", port_rtp_audio);
+	JANUS_LOG(LOG_VERB, "udpsrc RTP video port: %d\n", port_rtp_video);
+	JANUS_LOG(LOG_VERB, "udpsrc RTP audio port: %d\n", port_rtp_audio);
 
 	server = gst_rtsp_server_new();
 
