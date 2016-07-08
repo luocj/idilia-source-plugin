@@ -1407,11 +1407,11 @@ static void janus_source_request_keyframe(janus_source_session *session)
 	}
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_INFO, "Keyframe generation event while plugin or session is stopping\n");
+		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
 		return;
 	}
 
-	JANUS_LOG(LOG_INFO, "Sending a PLI to request keyframe\n");
+	JANUS_LOG(LOG_VERB, "Sending a PLI to request keyframe\n");
 	char buf[12];
 	memset(buf, 0, 12);
 	janus_rtcp_pli((char *)&buf, 12);
