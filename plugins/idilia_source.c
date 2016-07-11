@@ -208,6 +208,7 @@ typedef struct janus_source_session {
 	janus_source_socket rtcp_audio;
 	gchar * db_entry_session_id;
 	gint periodic_pli;
+	GstState rtsp_state;
 } janus_source_session;
 static GHashTable *sessions;
 static GList *old_sessions;
@@ -216,6 +217,7 @@ static GHashTable *sessions;
 static janus_mutex ports_pool_mutex;
 static ports_pool * pp;
 static CURL *curl_handle = NULL;
+static const char * gst_debug_str = "3"; //gst debug level string
 
 /* configuration options */
 static uint16_t udp_min_port = 0, udp_max_port = 0;
@@ -228,6 +230,7 @@ static gboolean request_key_frame_cb(gpointer data);
 static gboolean request_key_frame_periodic_cb(gpointer data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
+static gboolean request_key_frame_if_not_playing_cb(gpointer data);
 static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data);
 static void janus_source_close_session(janus_source_session * session);
 static void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len);
@@ -235,7 +238,6 @@ static void janus_source_relay_rtcp(janus_source_session *session, int video, ch
 static gboolean janus_source_create_socket(janus_source_socket * sck);
 static void janus_source_close_socket(janus_source_socket * sck);
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
-static void rtsp_media_new_state_cb(GstRTSPMedia *gstrtspmedia, gint arg1, gpointer user_data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
@@ -371,8 +373,10 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	}
 
 	gst_init(NULL, NULL);
+	gst_debug_set_threshold_from_string(gst_debug_str, FALSE);
+
 	curl_handle = curl_init();
-	
+
 	janus_mutex_init(&ports_pool_mutex);
 	//todo: read from config file
 	ports_pool_init(&pp, udp_min_port, udp_max_port);
@@ -384,8 +388,6 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the Source handler thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
-
-	curl_handle = curl_init();
 
 	JANUS_LOG(LOG_INFO, "%s initialized!\n", JANUS_SOURCE_NAME);
 	return 0;
@@ -488,6 +490,7 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	session->loop = NULL;
 	session->rtsp_thread = NULL;
 	session->periodic_pli = 0;
+	session->rtsp_state = GST_STATE_NULL;
 
 	janus_mutex_init(&session->rec_mutex);
 	session->bitrate = 0;	/* No limit */
@@ -631,7 +634,7 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 		JANUS_LOG(LOG_ERR, "RTSP thread creation failure\n");
 	}
 
-	session->periodic_pli = g_timeout_add(5000, request_key_frame_periodic_cb, (gpointer)session);
+	session->periodic_pli = g_timeout_add(10000, request_key_frame_periodic_cb, (gpointer)session);
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -1199,28 +1202,50 @@ static void janus_source_close_socket(janus_source_socket * sck) {
 }
 
 
-static void rtsp_media_new_state_cb(GstRTSPMedia *gstrtspmedia, gint arg1, gpointer user_data)
-{ 
-	//todo: remove
-	JANUS_LOG(LOG_INFO, "rtsp_media_new_state_cb: %d\n", (GstState)arg1);
+static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data)
+{
+	janus_source_session * session = (janus_source_session *)data;
+
+	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %d\n", (GstState)state);
+
+	g_atomic_int_set(&session->rtsp_state, state);
+	
+	if (state == GST_STATE_PAUSED) {
+		janus_source_request_keyframe(data);
+		/* ensure after 2s if keyframe was really obtained and pipeline switched into PLAYING */
+		g_timeout_add(2000, request_key_frame_if_not_playing_cb, data); 
+	}
+}
+
+static gboolean
+request_key_frame_if_not_playing_cb(gpointer data)
+{
+	janus_source_session * session = (janus_source_session *)data;
+
+	if (!session) {
+		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
+		return FALSE;
+	}
+
+	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
+		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
+		return FALSE;
+	}
+
+	if (g_atomic_int_get(&session->rtsp_state) == GST_STATE_PAUSED) {
+		JANUS_LOG(LOG_INFO, "State is GST_STATE_PAUSED; sendig pli and schedulling check\n");
+		janus_source_request_keyframe(data);
+		/* call this callback again, as we are still in PAUSED state */
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
 {
 	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
-	
-	g_signal_connect(media, "new-state", (GCallback)rtsp_media_new_state_cb, data);
-#if 0
-	GstElement * pipeline ;
-	GstElement *src ;
-	gint port ;
-
-	pipeline = gst_rtsp_media_get_element(media) ;
-
-	src = gst_bin_get_by_name(GST_BIN(pipeline), "udp_rtp_src_video") ;
-	g_object_get(src, "port", &port, NULL) ;
-	g_print("Read udp port: %d\n", port) ;
-#endif
+	g_signal_connect(media, "target-state", (GCallback)rtsp_media_target_state_cb, data);
 }
 
 static void
@@ -1229,7 +1254,7 @@ client_play_request_cb(GstRTSPClient  *gstrtspclient,
 	gpointer        data)
 {
 	JANUS_LOG(LOG_INFO, "client_play_request_cb\n") ;
-	//todo: find better callback for triggering this
+	//give clients some time to start collecting data
 	g_timeout_add(1000, request_key_frame_cb, data) ;
 }
 
@@ -1239,10 +1264,7 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 	gpointer       data)
 {
 	JANUS_LOG(LOG_INFO, "New client connected\n");		
-	
 	g_signal_connect(gstrtspclient, "play-request", (GCallback)client_play_request_cb, data);
-	g_timeout_add(1000, request_key_frame_cb, data);
-
 }
 
 static GstRTSPFilterResult
@@ -1261,12 +1283,9 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	GList * sessions_list;
 	gchar * launch_pipe = NULL;
 	int rtsp_port;
-
 	const gchar *http_post = g_strdup("POST");
 	janus_source_session *session = (janus_source_session *)data;
     
-
-
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		JANUS_LOG(LOG_INFO, "Plugin is stopping\n");
 		return FALSE;
@@ -1308,7 +1327,16 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	factory = gst_rtsp_media_factory_new();
 
 	gst_rtsp_media_factory_set_latency(factory, 0);
-	
+
+#if 1
+	gst_rtsp_media_factory_set_profiles(factory, GST_RTSP_PROFILE_AVP);
+#else
+	gst_rtsp_media_factory_set_profiles(factory, GST_RTSP_PROFILE_AVPF);
+
+	/* store up to 1 second of retransmission data */
+	gst_rtsp_media_factory_set_retransmission_time(factory, 1000 * GST_MSECOND);
+#endif
+
 	/* todo: use SDP to dynamically recognize content type */
 	if (session->has_video && session->has_audio)
 	{
@@ -1376,7 +1404,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", janus_get_public_ip(), rtsp_port);
 	
-	gboolean retCode = curl_request(curl_handle, status_service_url,rtsp_url,http_post,&(session->db_entry_session_id),TRUE);
+	gboolean retCode = curl_request(curl_handle, status_service_url, rtsp_url, http_post, &(session->db_entry_session_id), TRUE);
 	if(retCode != TRUE){
 	    JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
 	}
@@ -1411,7 +1439,7 @@ static void janus_source_request_keyframe(janus_source_session *session)
 		return;
 	}
 
-	JANUS_LOG(LOG_VERB, "Sending a PLI to request keyframe\n");
+	JANUS_LOG(LOG_INFO, "Sending a PLI to request keyframe\n");
 	char buf[12];
 	memset(buf, 0, 12);
 	janus_rtcp_pli((char *)&buf, 12);
