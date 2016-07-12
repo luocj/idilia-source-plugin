@@ -222,6 +222,8 @@ static const char * gst_debug_str = "3"; //gst debug level string
 /* configuration options */
 static uint16_t udp_min_port = 0, udp_max_port = 0;
 static gchar *status_service_url = NULL;
+static gint pli_period = 0;
+
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
@@ -241,6 +243,7 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
+static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *pli_period);
 
 /* External declarations (janus.h) */
 extern gchar *janus_get_local_ip(void);
@@ -344,6 +347,8 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			JANUS_LOG(LOG_VERB, "Parsing category '%s'\n", cat->name);
 			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
 			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
+			janus_source_parse_pli_period(janus_config_get_item(cat, "pli_period"), &pli_period);
+			
 			cl = cl->next;
 		}
 		janus_config_destroy(config);
@@ -634,7 +639,9 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 		JANUS_LOG(LOG_ERR, "RTSP thread creation failure\n");
 	}
 
-	session->periodic_pli = g_timeout_add(10000, request_key_frame_periodic_cb, (gpointer)session);
+	if (pli_period > 0) {
+		session->periodic_pli = g_timeout_add(pli_period, request_key_frame_periodic_cb, (gpointer)session);
+	}
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -1519,7 +1526,15 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url) {
     if(config_url && config_url->value){ 
-	*url = g_strdup(config_url->value);
+		*url = g_strdup(config_url->value);
     }
+}
+
+static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *pli_period) {
+	if (config_pli && config_pli->value) {
+		*pli_period = atoi(config_pli->value);
+	} else {
+		*pli_period = 0;
+	}
 }
 
