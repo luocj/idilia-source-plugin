@@ -577,13 +577,6 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 	JANUS_LOG(LOG_VERB, "Removing Source Plugin session...\n");
 
     
-	gboolean retCode =
-	curl_request(curl_handle,g_strdup_printf("%s/%s",status_service_url,g_strdup(session->db_entry_session_id)),"{}","DELETE",NULL,FALSE);
-        if(retCode != TRUE){
-            JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
-        }
-
-
 	janus_source_close_session(session);
 
 	janus_mutex_lock(&sessions_mutex);
@@ -1594,6 +1587,12 @@ static void janus_source_close_session_func(gpointer key, gpointer value, gpoint
 
 static void janus_source_close_session(janus_source_session * session) {
 	JANUS_LOG(LOG_INFO, "Closing source session\n");
+
+	gboolean retCode =
+		curl_request(curl_handle, g_strdup_printf("%s/%s", status_service_url, g_strdup(session->db_entry_session_id)), "{}", "DELETE", NULL, FALSE);
+	if (retCode != TRUE) {
+		JANUS_LOG(LOG_ERR, "Could not send the request to the server\n");
+	}
 
 	janus_source_deattach_rtcp_callback(&session->rtcp_video_cbk_data);
 	janus_source_deattach_rtcp_callback(&session->rtcp_audio_cbk_data);
