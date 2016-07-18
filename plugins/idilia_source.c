@@ -1337,6 +1337,7 @@ janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *sessi
 static void *janus_source_rtsp_server_thread(void *data) {
 
 	GMainLoop *loop;
+	GMainContext *worker_context;
 	GstRTSPServer *server;
 	GstRTSPMountPoints *mounts;
 	GstRTSPMediaFactory *factory;
@@ -1346,7 +1347,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	int rtsp_port;
 	const gchar *http_post = g_strdup("POST");
 	janus_source_session *session = (janus_source_session *)data;
-    
+
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		JANUS_LOG(LOG_INFO, "Plugin is stopping\n");
 		return FALSE;
@@ -1372,16 +1373,20 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	server = gst_rtsp_server_new();
 
 	gst_rtsp_server_set_address(server, janus_get_local_ip());
-	
+
 	/* Allocate random port */
 	gst_rtsp_server_set_service(server, "0");
 
-	/* make a mainloop for the default context */
-	loop = g_main_loop_new(NULL, FALSE);
+	/* Set up a worker context and make it thread-default */
+	worker_context = g_main_context_new();
+	g_main_context_push_thread_default(worker_context);
+
+	/* make a mainloop for the thread-default context */
+	loop = g_main_loop_new(g_main_context_get_thread_default(), FALSE);
 	session->loop = loop;
 
-	/* attach the server to the default maincontext */
-	if (gst_rtsp_server_attach(server, NULL) == 0) {
+	/* attach the server to the thread-default context */
+	if (gst_rtsp_server_attach(server, g_main_context_get_thread_default()) == 0) {
 		JANUS_LOG(LOG_ERR, "failed to attach the server\n");
 		goto error;
 	}
@@ -1483,21 +1488,21 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	/* attach the session to the "/camera" URL */
 	gst_rtsp_mount_points_add_factory(mounts, "/camera", factory);
 	g_object_unref(mounts);
-	
+
 	rtsp_port = gst_rtsp_server_get_bound_port(server);
 
 	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", janus_get_public_ip(), rtsp_port);
-	
+
 	gboolean retCode = curl_request(curl_handle, status_service_url, rtsp_url, http_post, &(session->db_entry_session_id), TRUE);
 	if (retCode != TRUE) {
-		JANUS_LOG(LOG_ERR,"Could not send the request to the server\n");
+		JANUS_LOG(LOG_ERR, "Could not send the request to the server\n");
 	}
-	
+
 	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", rtsp_url);
 	g_free(rtsp_url);
 
 	g_main_loop_run(loop);
-	
+
 	session_pool = gst_rtsp_server_get_session_pool(server);
 	sessions_list = gst_rtsp_session_pool_filter(session_pool, janus_source_close_rtsp_sessions, NULL);
 	g_list_free_full(sessions_list, gst_object_unref);
@@ -1507,6 +1512,8 @@ error:
 	JANUS_LOG(LOG_INFO, "Freeing RTSP server\n");
 	g_main_loop_unref(loop);
 	session->loop = NULL;
+	g_main_context_pop_thread_default(worker_context);
+	g_main_context_unref(worker_context);
 	return NULL;
 }
 
