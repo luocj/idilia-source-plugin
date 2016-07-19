@@ -576,13 +576,18 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 	}
 	JANUS_LOG(LOG_VERB, "Removing Source Plugin session...\n");
 
-    
-	gboolean retCode =
-	curl_request(curl_handle,g_strdup_printf("%s/%s",status_service_url,g_strdup(session->db_entry_session_id)),"{}","DELETE",NULL,FALSE);
-        if(retCode != TRUE){
-            JANUS_LOG(LOG_ERR,"Could not send the request to the server\n"); 
-        }
 
+	gchar *session_id = g_strdup(session->db_entry_session_id);
+	gchar *curl_str = g_strdup_printf("%s/%s", status_service_url, session_id);	
+
+	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL, FALSE);		    
+	
+	if (retCode != TRUE) {
+	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
+	}
+					       
+	g_free(session_id);
+        g_free(curl_str);
 
 	janus_source_close_session(session);
 
@@ -1345,7 +1350,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	GList * sessions_list;
 	gchar * launch_pipe = NULL;
 	int rtsp_port;
-	const gchar *http_post = g_strdup("POST");
+	gchar *http_post = g_strdup("POST");
 	janus_source_session *session = (janus_source_session *)data;
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
@@ -1500,7 +1505,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", rtsp_url);
 	g_free(rtsp_url);
-
+	g_free(http_post);
 	g_main_loop_run(loop);
 
 	session_pool = gst_rtsp_server_get_session_pool(server);
@@ -1617,6 +1622,11 @@ static void janus_source_close_session(janus_source_session * session) {
 	if (session->rtsp_thread != NULL) {
 		g_thread_join(session->rtsp_thread);
 		session->rtsp_thread = NULL;
+	}
+
+	if (session->db_entry_session_id != NULL) {
+		g_free(session->db_entry_session_id);
+	        session->db_entry_session_id = NULL;
 	}
 }
 

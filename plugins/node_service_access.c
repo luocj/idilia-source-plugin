@@ -6,17 +6,6 @@ CURL *curl_init(void) {
 }
 
 
-gchar *create_json(const gchar *url) {
-
-    json_t *object = json_object();
-
-    json_object_set_new(object, "Source", json_string(url)); 
-
-    return json_dumps(object,JSON_PRESERVE_ORDER);
-}
-
-
-
 static size_t curl_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
  
     if(userdata != NULL) { 
@@ -80,9 +69,15 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
     if (CURLE_OK != curl_code) {
 	retValue = FALSE;
     }
-    
 
-    curl_code = curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS,create_json(request));
+
+
+    json_t *object = json_object();
+    json_object_set_new(object, "Source", json_string(request)); 
+    gchar *request_str =  json_dumps(object, JSON_PRESERVE_ORDER);
+
+
+    curl_code = curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS,request_str);
     if (CURLE_OK != curl_code) {
 	retValue = FALSE;
     }
@@ -92,6 +87,12 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
     if(CURLE_OK != curl_code) {
 	retValue = FALSE;
     }
+
+    json_decref(object);
+
+    if (request_str != NULL) {
+       g_free(request_str);	
+    }   
 
 
     curl_slist_free_all(headers);

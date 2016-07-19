@@ -2,7 +2,6 @@
 #include <jansson.h>
 #include <glib.h>
 
-gchar *create_json(const gchar *url);
 
 CURL * curl_init(void);
 void curl_cleanup(CURL *curl_handle);
