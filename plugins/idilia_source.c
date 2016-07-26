@@ -218,8 +218,10 @@ typedef struct janus_source_session {
 	janus_source_socket rtcp_video_server;
 	janus_source_socket rtcp_audio_server;
 	gchar * db_entry_session_id;
+#ifdef PLI_WORKAROUND
 	gint periodic_pli;
 	GstState rtsp_state;
+#endif
 	janus_source_rtcp_cbk_data rtcp_video_cbk_data;
 	janus_source_rtcp_cbk_data rtcp_audio_cbk_data;
 } janus_source_session;
@@ -241,12 +243,14 @@ static gint pli_period = 0;
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
+#ifdef PLI_WORKAROUND
 static void janus_source_request_keyframe(janus_source_session *session);
 static gboolean request_key_frame_cb(gpointer data);
 static gboolean request_key_frame_periodic_cb(gpointer data);
+static gboolean request_key_frame_if_not_playing_cb(gpointer data);
+#endif
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
-static gboolean request_key_frame_if_not_playing_cb(gpointer data);
 static void janus_source_close_session_func(gpointer key, gpointer value, gpointer user_data);
 static void janus_source_close_session(janus_source_session * session);
 static void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len);
@@ -261,6 +265,7 @@ static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *p
 static gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 static void janus_source_attach_rtcp_callback(janus_source_socket * sck, GSourceFunc func, janus_source_rtcp_cbk_data * data);
 static void janus_source_deattach_rtcp_callback(janus_source_rtcp_cbk_data * cbk_data);
+static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
 
 
 /* External declarations (janus.h) */
@@ -514,8 +519,10 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 
 	session->loop = NULL;
 	session->rtsp_thread = NULL;
+#ifdef PLI_WORKAROUND
 	session->periodic_pli = 0;
 	session->rtsp_state = GST_STATE_NULL;
+#endif
 
 	janus_mutex_init(&session->rec_mutex);
 	session->bitrate = 0;	/* No limit */
@@ -575,20 +582,6 @@ void janus_source_destroy_session(janus_plugin_session *handle, int *error) {
 		return;
 	}
 	JANUS_LOG(LOG_VERB, "Removing Source Plugin session...\n");
-
-
-	gchar *session_id = g_strdup(session->db_entry_session_id);
-	gchar *curl_str = g_strdup_printf("%s/%s", status_service_url, session_id);	
-
-	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL, FALSE);		    
-	
-	if (retCode != TRUE) {
-	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
-	}
-					       
-	g_free(session_id);
-        g_free(curl_str);
-
 	janus_source_close_session(session);
 
 	janus_mutex_lock(&sessions_mutex);
@@ -673,10 +666,11 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 	if (!session->rtsp_thread) {
 		JANUS_LOG(LOG_ERR, "RTSP thread creation failure\n");
 	}
-
+#ifdef PLI_WORKAROUND
 	if (pli_period > 0) {
 		session->periodic_pli = g_timeout_add(pli_period, request_key_frame_periodic_cb, (gpointer)session);
 	}
+#endif
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -1258,10 +1252,10 @@ static void janus_source_close_socket(janus_source_socket * sck) {
 
 static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data)
 {
-	janus_source_session * session = (janus_source_session *)data;
-
 	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %d\n", (GstState)state);
 
+#ifdef PLI_WORKAROUND
+	janus_source_session * session = (janus_source_session *)data;
 	g_atomic_int_set(&session->rtsp_state, state);
 	
 	if (state == GST_STATE_PAUSED) {
@@ -1269,31 +1263,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 		/* ensure after 2s if keyframe was really obtained and pipeline switched into PLAYING */
 		g_timeout_add(2000, request_key_frame_if_not_playing_cb, data); 
 	}
-}
-
-static gboolean
-request_key_frame_if_not_playing_cb(gpointer data)
-{
-	janus_source_session * session = (janus_source_session *)data;
-
-	if (!session) {
-		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
-		return FALSE;
-	}
-
-	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
-		return FALSE;
-	}
-
-	if (g_atomic_int_get(&session->rtsp_state) == GST_STATE_PAUSED) {
-		JANUS_LOG(LOG_INFO, "State is GST_STATE_PAUSED; sendig pli and schedulling check\n");
-		janus_source_request_keyframe(data);
-		/* call this callback again, as we are still in PAUSED state */
-		return TRUE;
-	}
-
-	return FALSE;
+#endif
 }
 
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
@@ -1307,9 +1277,11 @@ client_play_request_cb(GstRTSPClient  *gstrtspclient,
 	GstRTSPContext *rtspcontext,
 	gpointer        data)
 {
-	JANUS_LOG(LOG_INFO, "client_play_request_cb\n") ;
+	JANUS_LOG(LOG_INFO, "client_play_request_cb\n");
+#ifdef PLI_WORKAROUND
 	//give clients some time to start collecting data
 	g_timeout_add(1000, request_key_frame_cb, data) ;
+#endif
 }
 
 static void
@@ -1317,6 +1289,8 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
 	gpointer       data)
 {
+	GstRTSPClientClass *klass = GST_RTSP_CLIENT_GET_CLASS(gstrtspclient);
+	klass->create_sdp = create_sdp;
 	JANUS_LOG(LOG_INFO, "New client connected\n");		
 	g_signal_connect(gstrtspclient, "play-request", (GCallback)client_play_request_cb, data);
 }
@@ -1327,12 +1301,14 @@ janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *sessi
 	return GST_RTSP_FILTER_REMOVE;	
 }
 
-#define PIPE_VIDEO_VP8 "udpsrc port=%d name=udp_rtp_src_video ! application/x-rtp, media=video, payload=100, encoding-name=VP8, clock-rate=90000, rtp-profile=3 ! .recv_rtp_sink rtpsession name=sess_vid \
-	.recv_rtp_src ! rtpvp8depay name=depay_vid \
-	udpsrc port=%d ! sess_vid.recv_rtcp_sink \
-	sess_vid.send_rtcp_src ! udpsink port=%d \
+#define PIPE_VIDEO_VP8 "rtpbin name=sess_vid rtp-profile=3 \
+	udpsrc port=%d caps=\"application/x-rtp, media=video, payload=100, encoding-name=VP8, clock-rate=90000, rtcp-fb-nack-pli=1, rtp-profile=3\" name=udp_rtp_src_video  \
+	! sess_vid.recv_rtp_sink_0 \
+	sess_vid. ! rtpvp8depay name=depay_vid \
+	udpsrc port=%d ! sess_vid.recv_rtcp_sink_0 \
+	sess_vid.send_rtcp_src_0 ! udpsink port=%d sync=false async=false \
 	depay_vid. ! rtpvp8pay pt=96 name=pay%d "
-
+	
 #define PIPE_AUDIO_OPUS "udpsrc port=%d name=udp_rtp_src_audio ! application/x-rtp, media=audio, payload=111, encoding-name=OPUS, clock-rate=48000, rtp-profile=3 ! .recv_rtp_sink rtpsession name=sess_aud \
 	.recv_rtp_src ! rtpopusdepay name=depay_aud \
 	udpsrc port=%d ! sess_aud.recv_rtcp_sink \
@@ -1342,7 +1318,6 @@ janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *sessi
 static void *janus_source_rtsp_server_thread(void *data) {
 
 	GMainLoop *loop;
-	GMainContext *worker_context;
 	GstRTSPServer *server;
 	GstRTSPMountPoints *mounts;
 	GstRTSPMediaFactory *factory;
@@ -1382,9 +1357,11 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	/* Allocate random port */
 	gst_rtsp_server_set_service(server, "0");
 
+#ifdef USE_THREAD_CONTEXT
 	/* Set up a worker context and make it thread-default */
-	worker_context = g_main_context_new();
+	GMainContext *worker_context = g_main_context_new();
 	g_main_context_push_thread_default(worker_context);
+#endif
 
 	/* make a mainloop for the thread-default context */
 	loop = g_main_loop_new(g_main_context_get_thread_default(), FALSE);
@@ -1400,13 +1377,13 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	gst_rtsp_media_factory_set_latency(factory, 0);
 
-#if 1
+#if 0
 	gst_rtsp_media_factory_set_profiles(factory, GST_RTSP_PROFILE_AVP);
 #else
 	gst_rtsp_media_factory_set_profiles(factory, GST_RTSP_PROFILE_AVPF);
 
 	/* store up to 1 second of retransmission data */
-	gst_rtsp_media_factory_set_retransmission_time(factory, 1000 * GST_MSECOND);
+	gst_rtsp_media_factory_set_retransmission_time(factory, 100 * GST_MSECOND);
 #endif
 
 	/* todo: use SDP to dynamically recognize content type */
@@ -1517,13 +1494,17 @@ error:
 	JANUS_LOG(LOG_INFO, "Freeing RTSP server\n");
 	g_main_loop_unref(loop);
 	session->loop = NULL;
+#ifdef USE_THREAD_CONTEXT
 	g_main_context_pop_thread_default(worker_context);
 	g_main_context_unref(worker_context);
+#endif
 	return NULL;
 }
 
+#ifdef PLI_WORKAROUND
 static void janus_source_request_keyframe(janus_source_session *session)
 {
+
 	if (!session) {
 		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
 		return;
@@ -1554,6 +1535,32 @@ request_key_frame_periodic_cb(gpointer data)
 	janus_source_request_keyframe((janus_source_session *)data);
 	return TRUE;
 }
+
+static gboolean
+request_key_frame_if_not_playing_cb(gpointer data)
+{
+	janus_source_session * session = (janus_source_session *)data;
+
+	if (!session) {
+	JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
+	return FALSE;
+}
+
+	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
+	JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
+	return FALSE;
+}
+
+	if (g_atomic_int_get(&session->rtsp_state) == GST_STATE_PAUSED) {
+	JANUS_LOG(LOG_INFO, "State is GST_STATE_PAUSED; sendig pli and schedulling check\n");
+	janus_source_request_keyframe(data);
+	/* call this callback again, as we are still in PAUSED state */
+	return TRUE;
+}
+
+	return FALSE;
+}
+#endif
 
 static gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data)
 {
@@ -1600,6 +1607,18 @@ static void janus_source_close_session_func(gpointer key, gpointer value, gpoint
 static void janus_source_close_session(janus_source_session * session) {
 	JANUS_LOG(LOG_INFO, "Closing source session\n");
 
+	gchar *session_id = g_strdup(session->db_entry_session_id);
+	gchar *curl_str = g_strdup_printf("%s/%s", status_service_url, session_id);	
+
+	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL, FALSE);		    
+	
+	if (retCode != TRUE) {
+	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
+	}
+					       
+	g_free(session_id);
+        g_free(curl_str);
+
 	janus_source_deattach_rtcp_callback(&session->rtcp_video_cbk_data);
 	janus_source_deattach_rtcp_callback(&session->rtcp_audio_cbk_data);
 
@@ -1610,10 +1629,11 @@ static void janus_source_close_session(janus_source_session * session) {
 	janus_source_close_socket(&session->rtcp_audio_client);
 	janus_source_close_socket(&session->rtcp_audio_server);
 
-
+#ifdef PLI_WORKAROUND
 	if (session->periodic_pli) {
 		g_source_remove(session->periodic_pli);
 	}
+#endif
 
 	if (session->loop) {
 		g_main_loop_quit(session->loop);
@@ -1672,3 +1692,57 @@ static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *p
 	}
 }
 
+static GstSDPMessage *
+create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
+{
+	GstSDPMessage *sdp;
+	GstSDPInfo info;
+
+	guint64 session_id_tmp;
+	gchar session_id[21];
+	const char * server_ip = janus_get_public_ip();
+	const gchar *proto = "IP4"; //todo: support IPV6
+
+	gst_sdp_message_new(&sdp);
+
+	/* some standard things first */
+	gst_sdp_message_set_version(sdp, "0");
+
+	session_id_tmp = (((guint64)g_random_int()) << 32) | g_random_int();
+	g_snprintf(session_id, sizeof(session_id), "%" G_GUINT64_FORMAT,
+		session_id_tmp);
+
+	gst_sdp_message_set_origin(sdp, "-", session_id, "1", "IN", proto, server_ip);
+
+	gst_sdp_message_set_session_name(sdp, "Session streamed with Tomek");
+	gst_sdp_message_set_information(sdp, "rtsp-server");
+	gst_sdp_message_add_time(sdp, "0", "0", NULL);
+	gst_sdp_message_add_attribute(sdp, "tool", "GStreamer");
+	gst_sdp_message_add_attribute(sdp, "type", "broadcast");
+	gst_sdp_message_add_attribute(sdp, "control", "*");
+
+	info.is_ipv6 = !!g_strcmp0(proto, "IP4");
+	info.server_ip = server_ip;
+
+	/* create an SDP for the media object */
+	if (!gst_rtsp_media_setup_sdp(media, sdp, &info))
+		goto no_sdp;
+
+	GstSDPMedia * sdpmedia = (GstSDPMedia *)gst_sdp_message_get_media(sdp, 0);
+	g_assert(sdpmedia);
+
+	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 ccm fir");
+	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack");
+	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack pli");
+	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "127 nack");
+
+	return sdp;
+
+	/* ERRORS */
+no_sdp:
+	{
+		GST_ERROR("client %p: could not create SDP", client);
+		gst_sdp_message_free(sdp);
+		return NULL;
+	}
+}
