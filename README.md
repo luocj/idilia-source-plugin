@@ -6,8 +6,8 @@ Source plugin for <b>Janus WebRTC Gateway v0.1.1</b> based on orginal echotest p
 
 Follow the instructions from https://github.com/meetecho/janus-gateway/blob/master/README.md and then:
 
-    git clone https://github.com/MotorolaSolutions/idilia-source-plugin.git</br>
-    cd idilia-source-plugin</br>
-    sh autogen.sh</br>
-    ./configure</br>
-    sudo make install configs</br>
+    git clone https://github.com/MotorolaSolutions/idilia-source-plugin.git
+    cd idilia-source-plugin
+    sh autogen.sh
+    ./configure
+    sudo make install configs
