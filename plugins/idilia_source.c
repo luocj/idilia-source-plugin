@@ -246,6 +246,8 @@ static const char * gst_debug_str = "3"; //gst debug level string
 static uint16_t udp_min_port = 0, udp_max_port = 0;
 static gchar *status_service_url = NULL;
 static gint pli_period = 0;
+static gboolean use_codec_priority = FALSE;
+static idilia_codec codec_priority_list[] = { IDILIA_CODEC_INVALID, IDILIA_CODEC_INVALID };
 
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
@@ -265,6 +267,7 @@ static void janus_source_relay_rtcp(janus_source_session *session, int video, ch
 static gboolean janus_source_create_socket(janus_source_socket * sck, gboolean is_client);
 static void janus_source_close_socket(janus_source_socket * sck);
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
+static void janus_source_parse_video_codec_priority(janus_config_item *config);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
@@ -273,6 +276,7 @@ static gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOConditio
 static void janus_source_attach_rtcp_callback(janus_source_socket * sck, GSourceFunc func, janus_source_rtcp_cbk_data * data);
 static void janus_source_deattach_rtcp_callback(janus_source_rtcp_cbk_data * cbk_data);
 static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp);
+static idilia_codec janus_source_select_video_codec_by_priority_list(const gchar * sdp);
 static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
 
 /* External declarations (janus.h) */
@@ -378,6 +382,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
 			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
 			janus_source_parse_pli_period(janus_config_get_item(cat, "pli_period"), &pli_period);
+			janus_source_parse_video_codec_priority(janus_config_get_item(cat, "video_codec_priority"));
 			
 			cl = cl->next;
 		}
@@ -1752,6 +1757,30 @@ static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *p
 	}
 }
 
+static void janus_source_parse_video_codec_priority(janus_config_item *config)
+{
+	if (config && config->value)
+	{
+		/* Split in min and max port */
+		char * codec2 = strrchr(config->value, ',');
+		if (codec2 != NULL)
+		{
+			*codec2 = '\0';
+			codec2++;
+			const char * codec1 = config->value;
+			JANUS_LOG(LOG_INFO, "\n\n\ncodec1=%s; codec2=%s\n", codec1, codec2);
+			
+			codec_priority_list[0] = sdp_codec_name_to_id(codec1);
+			codec_priority_list[1] = sdp_codec_name_to_id(codec2);
+			use_codec_priority = TRUE;
+		}
+	}
+	else
+	{
+		use_codec_priority = FALSE;
+	}
+}
+
 static GstSDPMessage *
 create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 {
@@ -1807,11 +1836,21 @@ no_sdp:
 	}
 }
 
+static idilia_codec janus_source_select_video_codec_by_priority_list(const gchar * sdp)
+{
+	for (guint i = 0; i < sizeof(codec_priority_list) / sizeof(codec_priority_list[0]); i++) {
+	if (sdp_get_codec_pt(sdp, codec_priority_list[i]) != -1)
+		return codec_priority_list[i];
+	}
+	
+	return IDILIA_CODEC_INVALID;
+}
+
 static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp)
 {
 	gchar * sdp = NULL;
 	
-	idilia_codec preferred_codec = sdp_select_video_codec_by_priority_list(orig_sdp);
+	idilia_codec preferred_codec = janus_source_select_video_codec_by_priority_list(orig_sdp);
 	sdp = sdp_set_video_codec(orig_sdp, preferred_codec);
 	g_free(orig_sdp);
 			
@@ -1825,3 +1864,4 @@ static gchar * janus_source_do_codec_negotiation(janus_source_session * session,
 		
 	return sdp;
 }
+

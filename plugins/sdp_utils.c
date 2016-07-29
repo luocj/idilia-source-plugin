@@ -19,29 +19,10 @@ codec_name_mapping_t codec_name_mapping[] =
 	{ "INVALID", IDILIA_CODEC_INVALID }
 };
 
-idilia_codec codec_priority_list[] =
-{ 
-	IDILIA_CODEC_H264,
-	IDILIA_CODEC_VP9,
-	IDILIA_CODEC_VP8
-};
-
 static gchar * str_replace_once(const gchar * input, const gchar * old_string, const gchar * new_string);
 static gint sdp_get_codec_pt_for_type(const gchar * sdp, const gchar * type);
-static idilia_codec sdp_codec_name_to_id(gchar * name);
 static idilia_codec sdp_pt_to_codec_id(const char * sdp, gint pt);
 static idilia_codec sdp_pt_to_codec_id(const char * sdp, gint pt);
-
-
-idilia_codec sdp_select_video_codec_by_priority_list(const gchar * sdp)
-{
-	for (guint i = 0; i < sizeof(codec_priority_list) / sizeof(codec_priority_list[0]); i++) {
-		if (sdp_get_codec_pt(sdp, codec_priority_list[i]) != -1)
-			return codec_priority_list[i];
-	}
-	
-	return IDILIA_CODEC_INVALID;
-}
 
 const gchar * get_codec_name(idilia_codec codec)
 {
@@ -54,6 +35,16 @@ const gchar * get_codec_name(idilia_codec codec)
 	return "INVALID";
 }
 
+idilia_codec sdp_codec_name_to_id(const gchar * name)
+{
+	for (guint i = 0; i < sizeof(codec_name_mapping) / sizeof(codec_name_mapping[0]); i++) {
+		if (!g_strcmp0(codec_name_mapping[i].name, name)) {
+			return codec_name_mapping[i].id;
+		}
+	}
+
+	return IDILIA_CODEC_INVALID;
+}
 
 gint sdp_get_codec_pt(const gchar * sdp, idilia_codec codec)
 {
@@ -181,18 +172,6 @@ static idilia_codec sdp_pt_to_codec_id(const char * sdp, gint pt)
 	}
 	
 	return codec;
-}
-
-
-static idilia_codec sdp_codec_name_to_id(gchar * name)
-{
-	for (guint i = 0; i < sizeof(codec_name_mapping) / sizeof(codec_name_mapping[0]); i++) {
-		if (!g_strcmp0(codec_name_mapping[i].name, name)) {
-			return codec_name_mapping[i].id;
-		}
-	}
-
-	return IDILIA_CODEC_INVALID;
 }
 
 static gchar * str_replace_once(const gchar * input, const gchar * old_string, const gchar * new_string)
