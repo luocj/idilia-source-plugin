@@ -100,6 +100,7 @@
 #include <gst/rtsp-server/rtsp-server.h>
 #include "ports_pool.h"
 #include "node_service_access.h"
+#include "sdp_utils.h"
 
 
 /* Plugin information */
@@ -109,6 +110,8 @@
 #define JANUS_SOURCE_NAME		        "Idilia Source plugin"
 #define JANUS_SOURCE_AUTHOR			    "Motorola Solutions Inc."
 #define JANUS_SOURCE_PACKAGE			"idilia.plugin.source"
+
+//#define PLI_WORKAROUND
 
 /* Plugin methods */
 janus_plugin *create(void);
@@ -172,6 +175,8 @@ static GThread *handler_thread;
 static GThread *watchdog;
 static void *janus_source_handler(void *data);
 
+
+
 typedef struct janus_source_message {
 	janus_plugin_session *handle;
 	char *transaction;
@@ -198,8 +203,6 @@ typedef struct janus_source_rtcp_cbk_data
 
 typedef struct janus_source_session {
 	janus_plugin_session *handle;
-	gboolean has_audio;
-	gboolean has_video;
 	gboolean audio_active;
 	gboolean video_active;
 	uint64_t bitrate;
@@ -224,6 +227,10 @@ typedef struct janus_source_session {
 #endif
 	janus_source_rtcp_cbk_data rtcp_video_cbk_data;
 	janus_source_rtcp_cbk_data rtcp_audio_cbk_data;
+	idilia_codec video_codec;
+	idilia_codec audio_codec;
+	gint video_codec_pt;
+	gint audio_codec_pt;
 } janus_source_session;
 
 static GHashTable *sessions;
@@ -265,8 +272,8 @@ static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *p
 static gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 static void janus_source_attach_rtcp_callback(janus_source_socket * sck, GSourceFunc func, janus_source_rtcp_cbk_data * data);
 static void janus_source_deattach_rtcp_callback(janus_source_rtcp_cbk_data * cbk_data);
+static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp);
 static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
-
 
 /* External declarations (janus.h) */
 extern gchar *janus_get_local_ip(void);
@@ -381,7 +388,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	if (udp_min_port <= 0 || udp_max_port <= 0) {
 		udp_min_port = 4000;
 		udp_max_port = 5000;
-		JANUS_LOG(LOG_ERR, "Using default port range: %d-%d\n", udp_min_port, udp_max_port);
+		JANUS_LOG(LOG_WARN, "Using default port range: %d-%d\n", udp_min_port, udp_max_port);
 	}
 
 	sessions = g_hash_table_new(NULL, NULL);
@@ -406,7 +413,6 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	curl_handle = curl_init();
 
 	janus_mutex_init(&ports_pool_mutex);
-	//todo: read from config file
 	ports_pool_init(&pp, udp_min_port, udp_max_port);
 	
 	/* Launch the thread that will handle incoming messages */
@@ -504,15 +510,16 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 		return;
 	}
 	session->handle = handle;
-	session->has_audio = FALSE;
-	session->has_video = FALSE;
 	session->audio_active = TRUE;
 	session->video_active = TRUE;
+	session->video_codec = IDILIA_CODEC_INVALID;
+	session->audio_codec = IDILIA_CODEC_INVALID;
+	session->video_codec_pt = -1;
+	session->audio_codec_pt = -1;
 
-
-	memset(&session->rtp_video_client, 0, sizeof(session->rtp_video_client));
+	memset(&session->rtp_video_client,  0, sizeof(session->rtp_video_client));
 	memset(&session->rtcp_video_client, 0, sizeof(session->rtcp_video_client));
-	memset(&session->rtp_audio_client, 0, sizeof(session->rtp_audio_client));
+	memset(&session->rtp_audio_client,  0, sizeof(session->rtp_audio_client));
 	memset(&session->rtcp_audio_client, 0, sizeof(session->rtcp_audio_client));
 	memset(&session->rtcp_video_server, 0, sizeof(session->rtcp_video_server));
 	memset(&session->rtcp_audio_server, 0, sizeof(session->rtcp_audio_server));
@@ -659,8 +666,8 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 	g_atomic_int_set(&session->hangingup, 0);
 	/* We really don't care, as we only send RTP/RTCP we get in the first place back anyway */
 	
-	JANUS_LOG(LOG_VERB, "video_active: %d, audio_active: %d, has_video: %d, has_audio: %d\n", 
-		session->video_active, session->audio_active, session->has_video, session->has_audio);
+	JANUS_LOG(LOG_VERB, "video_active: %d, audio_active: %d\n", 
+		session->video_active, session->audio_active);
 
 	session->rtsp_thread = g_thread_try_new("rtsp server", janus_source_rtsp_server_thread, session, NULL); 
 	if (!session->rtsp_thread) {
@@ -823,8 +830,6 @@ void janus_source_hangup_media(janus_plugin_session *handle) {
 	session->vrc = NULL;
 	janus_mutex_unlock(&session->rec_mutex);
 	/* Reset controls */
-	session->has_audio = FALSE;
-	session->has_video = FALSE;
 	session->audio_active = TRUE;
 	session->video_active = TRUE;
 	session->bitrate = 0;
@@ -1039,13 +1044,7 @@ static void *janus_source_handler(void *data) {
 			janus_mutex_unlock(&session->rec_mutex);
 		}
 #endif //recording
-		/* Any SDP to handle? */
-		if (msg->sdp) {
-			JANUS_LOG(LOG_VERB, "This is involving a negotiation (%s) as well:\n%s\n", msg->sdp_type, msg->sdp);
-			session->has_audio = (strstr(msg->sdp, "m=audio") != NULL);
-			session->has_video = (strstr(msg->sdp, "m=video") != NULL);
-		}
-
+		
 		if (!audio && !video && !bitrate && !record && !msg->sdp) {
 			JANUS_LOG(LOG_ERR, "No supported attributes (audio, video, bitrate, record, jsep) found\n");
 			error_code = JANUS_SOURCE_ERROR_INVALID_ELEMENT;
@@ -1100,6 +1099,9 @@ static void *janus_source_handler(void *data) {
 				sdp = janus_string_replace(sdp, " 97", "");
 				sdp = janus_string_replace(sdp, " 98", "");
 			}
+			
+			sdp = janus_source_do_codec_negotiation(session, sdp);
+			
 			/* How long will the gateway take to push the event? */
 			g_atomic_int_set(&session->hangingup, 0);
 			gint64 start = janus_get_monotonic_time();
@@ -1302,18 +1304,99 @@ janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *sessi
 }
 
 #define PIPE_VIDEO_VP8 "rtpbin name=sess_vid rtp-profile=3 \
-	udpsrc port=%d caps=\"application/x-rtp, media=video, payload=100, encoding-name=VP8, clock-rate=90000, rtcp-fb-nack-pli=1, rtp-profile=3\" name=udp_rtp_src_video  \
+	udpsrc port=%d caps=\"application/x-rtp, media=video, payload=%d, encoding-name=VP8, clock-rate=90000, rtcp-fb-nack-pli=1, rtp-profile=3\" name=udp_rtp_src_video  \
 	! sess_vid.recv_rtp_sink_0 \
 	sess_vid. ! rtpvp8depay name=depay_vid \
 	udpsrc port=%d ! sess_vid.recv_rtcp_sink_0 \
 	sess_vid.send_rtcp_src_0 ! udpsink port=%d sync=false async=false \
-	depay_vid. ! rtpvp8pay pt=96 name=pay%d "
+	depay_vid. ! rtpvp8pay pt=96"
+
+#define PIPE_VIDEO_VP9 "rtpbin name=sess_vid rtp-profile=3 \
+	udpsrc port=%d caps=\"application/x-rtp, media=video, payload=%d, encoding-name=VP9, clock-rate=90000, rtcp-fb-nack-pli=1, rtp-profile=3\" name=udp_rtp_src_video  \
+	! sess_vid.recv_rtp_sink_0 \
+	sess_vid. ! rtpvp9depay name=depay_vid \
+	udpsrc port=%d ! sess_vid.recv_rtcp_sink_0 \
+	sess_vid.send_rtcp_src_0 ! udpsink port=%d sync=false async=false \
+	depay_vid. ! rtpvp9pay pt=96"
+
+#define PIPE_VIDEO_H264 "rtpbin name=sess_vid rtp-profile=3 \
+	udpsrc port=%d caps=\"application/x-rtp, media=video, payload=%d, encoding-name=H264, clock-rate=90000, rtcp-fb-nack-pli=1, rtp-profile=3\" name=udp_rtp_src_video  \
+	! sess_vid.recv_rtp_sink_0 \
+	sess_vid. ! rtph264depay name=depay_vid \
+	udpsrc port=%d ! sess_vid.recv_rtcp_sink_0 \
+	sess_vid.send_rtcp_src_0 ! udpsink port=%d sync=false async=false \
+	depay_vid. ! rtph264pay pt=96"
 	
-#define PIPE_AUDIO_OPUS "udpsrc port=%d name=udp_rtp_src_audio ! application/x-rtp, media=audio, payload=111, encoding-name=OPUS, clock-rate=48000, rtp-profile=3 ! .recv_rtp_sink rtpsession name=sess_aud \
+#define PIPE_AUDIO_OPUS "udpsrc port=%d name=udp_rtp_src_audio ! application/x-rtp, media=audio, payload=%d, encoding-name=OPUS, clock-rate=48000, rtp-profile=3 ! .recv_rtp_sink rtpsession name=sess_aud \
 	.recv_rtp_src ! rtpopusdepay name=depay_aud \
 	udpsrc port=%d ! sess_aud.recv_rtcp_sink \
 	sess_aud.send_rtcp_src ! udpsink port=%d \
-	depay_aud. ! audio/x-opus, channels=1 ! rtpopuspay pt=127 name=pay%d "
+	depay_aud. ! audio/x-opus, channels=1 ! rtpopuspay pt=127"
+
+static gchar * janus_source_create_launch_pipe(janus_source_session * session) {
+	gchar * launch_pipe = NULL;
+	gchar * launch_pipe_video = NULL;
+	gchar * launch_pipe_audio = NULL;
+
+	if (session->video_codec != IDILIA_CODEC_INVALID)
+	{
+		switch (session->video_codec)
+		{
+		case IDILIA_CODEC_VP8:
+			launch_pipe_video = g_strdup_printf(PIPE_VIDEO_VP8,
+				session->rtp_video_client.port,
+				session->video_codec_pt,
+				session->rtcp_video_client.port,
+				session->rtcp_video_server.port);
+			break;
+		case IDILIA_CODEC_VP9:
+			launch_pipe_video = g_strdup_printf(PIPE_VIDEO_VP9,
+				session->rtp_video_client.port,
+				session->video_codec_pt,
+				session->rtcp_video_client.port,
+				session->rtcp_video_server.port);
+			break;
+		case IDILIA_CODEC_H264:
+			launch_pipe_video = g_strdup_printf(PIPE_VIDEO_H264,
+				session->rtp_video_client.port,
+				session->video_codec_pt,
+				session->rtcp_video_client.port,
+				session->rtcp_video_server.port);
+			break;
+		default: 
+			break;
+		}
+	}
+
+	if (session->audio_codec != IDILIA_CODEC_INVALID) {
+
+		launch_pipe_audio = g_strdup_printf(PIPE_AUDIO_OPUS,
+			session->rtp_audio_client.port,
+			session->audio_codec_pt,
+			session->rtcp_audio_client.port,
+			session->rtcp_audio_server.port);
+	}
+
+	if (session->video_codec != IDILIA_CODEC_INVALID && session->audio_codec != IDILIA_CODEC_INVALID) {
+		launch_pipe = g_strdup_printf("( %s name=pay0  %s name=pay1 )", launch_pipe_video, launch_pipe_audio);
+	}
+	else if (session->video_codec != IDILIA_CODEC_INVALID && session->audio_codec == IDILIA_CODEC_INVALID) {
+		launch_pipe = g_strdup_printf("( %s name=pay0 )", launch_pipe_video);
+	}
+	else if (session->video_codec == IDILIA_CODEC_INVALID && session->audio_codec != IDILIA_CODEC_INVALID) {
+		launch_pipe = g_strdup_printf("( %s name=pay0 )", launch_pipe_audio);
+	}
+
+	if (launch_pipe_video) {
+		g_free(launch_pipe_video);
+	}
+
+	if (launch_pipe_audio) {
+		g_free(launch_pipe_audio);
+	}
+
+	return launch_pipe;
+}
 
 static void *janus_source_rtsp_server_thread(void *data) {
 
@@ -1355,7 +1438,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	gst_rtsp_server_set_address(server, janus_get_local_ip());
 
 	/* Allocate random port */
-	gst_rtsp_server_set_service(server, "0");
+	gst_rtsp_server_set_service(server, "1234");
 
 #ifdef USE_THREAD_CONTEXT
 	/* Set up a worker context and make it thread-default */
@@ -1386,35 +1469,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	gst_rtsp_media_factory_set_retransmission_time(factory, 100 * GST_MSECOND);
 #endif
 
-	/* todo: use SDP to dynamically recognize content type */
-	if (session->has_video && session->has_audio)
-	{
-		launch_pipe = g_strdup_printf("( " PIPE_VIDEO_VP8 PIPE_AUDIO_OPUS " )",
-			session->rtp_video_client.port,
-			session->rtcp_video_client.port,
-			session->rtcp_video_server.port,
-			0,
-			session->rtp_audio_client.port,
-			session->rtcp_audio_client.port,
-			session->rtcp_audio_server.port,
-			1);
-	}
-	else if (session->has_video && !session->has_audio)
-	{
-		launch_pipe = g_strdup_printf("( " PIPE_VIDEO_VP8 " )",
-			session->rtp_video_client.port,
-			session->rtcp_video_client.port,
-			session->rtcp_video_server.port,
-			0);
-	}
-	else if (!session->has_video && session->has_audio)
-	{
-		launch_pipe = g_strdup_printf("( " PIPE_AUDIO_OPUS " )",
-			session->rtp_audio_client.port,
-			session->rtcp_audio_client.port,
-			session->rtcp_audio_server.port,
-			0);
-	}
+	launch_pipe = janus_source_create_launch_pipe(session);
 
 	gst_rtsp_media_factory_set_launch(factory, launch_pipe);
 	g_free(launch_pipe);
@@ -1473,7 +1528,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 
 	rtsp_port = gst_rtsp_server_get_bound_port(server);
 
-	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", janus_get_public_ip(), rtsp_port);
+	gchar *rtsp_url = g_strdup_printf("rtsp://%s:%d/camera", janus_get_local_ip(), rtsp_port);
 
 	gboolean retCode = curl_request(curl_handle, status_service_url, rtsp_url, http_post, &(session->db_entry_session_id), TRUE);
 	if (retCode != TRUE) {
@@ -1615,9 +1670,14 @@ static void janus_source_close_session(janus_source_session * session) {
 	if (retCode != TRUE) {
 	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
 	}
-					       
-	g_free(session_id);
-        g_free(curl_str);
+			
+	if (session_id) {
+		g_free(session_id);
+	}
+	
+	if (curl_str) {
+		g_free(curl_str);
+	}
 
 	janus_source_deattach_rtcp_callback(&session->rtcp_video_cbk_data);
 	janus_source_deattach_rtcp_callback(&session->rtcp_audio_cbk_data);
@@ -1646,7 +1706,7 @@ static void janus_source_close_session(janus_source_session * session) {
 
 	if (session->db_entry_session_id != NULL) {
 		g_free(session->db_entry_session_id);
-	        session->db_entry_session_id = NULL;
+	    session->db_entry_session_id = NULL;
 	}
 }
 
@@ -1700,7 +1760,7 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 
 	guint64 session_id_tmp;
 	gchar session_id[21];
-	const char * server_ip = janus_get_public_ip();
+	const char * server_ip = janus_get_local_ip();
 	const gchar *proto = "IP4"; //todo: support IPV6
 
 	gst_sdp_message_new(&sdp);
@@ -1714,7 +1774,7 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 
 	gst_sdp_message_set_origin(sdp, "-", session_id, "1", "IN", proto, server_ip);
 
-	gst_sdp_message_set_session_name(sdp, "Session streamed with Tomek");
+	gst_sdp_message_set_session_name(sdp, "Idilia source session");
 	gst_sdp_message_set_information(sdp, "rtsp-server");
 	gst_sdp_message_add_time(sdp, "0", "0", NULL);
 	gst_sdp_message_add_attribute(sdp, "tool", "GStreamer");
@@ -1745,4 +1805,23 @@ no_sdp:
 		gst_sdp_message_free(sdp);
 		return NULL;
 	}
+}
+
+static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp)
+{
+	gchar * sdp = NULL;
+	
+	idilia_codec preferred_codec = sdp_select_video_codec_by_priority_list(orig_sdp);
+	sdp = sdp_set_video_codec(orig_sdp, preferred_codec);
+	g_free(orig_sdp);
+			
+	session->video_codec = sdp_get_video_codec(sdp);
+	session->audio_codec = sdp_get_audio_codec(sdp);
+	session->video_codec_pt = sdp_get_codec_pt(sdp, session->video_codec);
+	session->audio_codec_pt = sdp_get_codec_pt(sdp, session->audio_codec);
+	
+	JANUS_LOG(LOG_INFO, "Video codec used: %s\n", get_codec_name(session->video_codec));
+	JANUS_LOG(LOG_INFO, "Audio codec used: %s\n", get_codec_name(session->audio_codec));
+		
+	return sdp;
 }

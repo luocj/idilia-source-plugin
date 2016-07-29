@@ -7,7 +7,7 @@ AM_CFLAGS = \
 	-Wpacked -Wpointer-arith -Wmissing-format-attribute -Wmissing-noreturn \
 	-Wnested-externs -Wstrict-prototypes -Wunsafe-loop-optimizations \
 	-Wwrite-strings -Wno-missing-field-initializers -Wno-unused-parameter \
-	-Wcast-align -Wformat-nonliteral -Wformat-security -Wswitch-default \
+	-Wcast-align -Wformat-security -Wswitch-default \
 	-Wmissing-include-dirs -Wno-aggregate-return -Wunused-but-set-variable \
 	-Warray-bounds -Wold-style-definition -Wsign-compare -Wlarger-than=65537
 AM_CFLAGS += -Wno-undef  # sophiasip is not -Wundef--safe
@@ -53,7 +53,7 @@ plugins_libadd = \
 
 if ENABLE_PLUGIN_SOURCE
 plugin_LTLIBRARIES += plugins/libidilia_source.la
-plugins_libidilia_source_la_SOURCES = plugins/idilia_source.c plugins/ports_pool.c plugins/node_service_access.c
+plugins_libidilia_source_la_SOURCES = plugins/idilia_source.c plugins/ports_pool.c plugins/node_service_access.c plugins/sdp_utils.c
 plugins_libidilia_source_la_CFLAGS = $(plugins_cflags)
 plugins_libidilia_source_la_LDFLAGS = $(plugins_ldflags)
 plugins_libidilia_source_la_LIBADD = $(plugins_libadd)
