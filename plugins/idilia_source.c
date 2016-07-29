@@ -1438,7 +1438,7 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	gst_rtsp_server_set_address(server, janus_get_local_ip());
 
 	/* Allocate random port */
-	gst_rtsp_server_set_service(server, "1234");
+	gst_rtsp_server_set_service(server, "0");
 
 #ifdef USE_THREAD_CONTEXT
 	/* Set up a worker context and make it thread-default */
