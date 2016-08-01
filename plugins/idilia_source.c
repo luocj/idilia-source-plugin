@@ -1761,14 +1761,12 @@ static void janus_source_parse_video_codec_priority(janus_config_item *config)
 {
 	if (config && config->value)
 	{
-		/* Split in min and max port */
 		char * codec2 = strrchr(config->value, ',');
 		if (codec2 != NULL)
 		{
 			*codec2 = '\0';
 			codec2++;
 			const char * codec1 = config->value;
-			JANUS_LOG(LOG_INFO, "\n\n\ncodec1=%s; codec2=%s\n", codec1, codec2);
 			
 			codec_priority_list[0] = sdp_codec_name_to_id(codec1);
 			codec_priority_list[1] = sdp_codec_name_to_id(codec2);
@@ -1820,10 +1818,8 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 	GstSDPMedia * sdpmedia = (GstSDPMedia *)gst_sdp_message_get_media(sdp, 0);
 	g_assert(sdpmedia);
 
-	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 ccm fir");
 	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack");
 	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack pli");
-	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "127 nack");
 
 	return sdp;
 
