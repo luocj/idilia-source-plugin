@@ -1,3 +1,4 @@
+#pragma once
 #include <curl/curl.h>
 #include <jansson.h>
 #include <glib.h>
