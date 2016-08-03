@@ -1,5 +1,6 @@
 #pragma once
 
+#include <curl/curl.h>
 #include "socket_utils.h"
 #include "sdp_utils.h"
 #include "plugin.h"
@@ -39,6 +40,9 @@ typedef struct janus_source_session {
 	gint64 destroyed;	/* Time at which this session was marked as destroyed */
 	gchar * db_entry_session_id;
 	gchar * rtsp_url;
+	gchar * id; /* stream id */
+	CURL *curl_handle;	
+	gchar *status_service_url;
 #ifdef PLI_WORKAROUND
 	gint periodic_pli;
 	GstState rtsp_state;
@@ -48,3 +52,7 @@ typedef struct janus_source_session {
 	idilia_codec codec[JANUS_SOURCE_STREAM_MAX];
 	gint codec_pt[JANUS_SOURCE_STREAM_MAX];
 } janus_source_session;
+
+#ifdef PLI_WORKAROUND
+void janus_source_request_keyframe(janus_source_session *session);
+#endif
