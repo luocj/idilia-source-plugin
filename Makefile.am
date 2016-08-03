@@ -53,7 +53,7 @@ plugins_libadd = \
 
 if ENABLE_PLUGIN_SOURCE
 plugin_LTLIBRARIES += plugins/libidilia_source.la
-plugins_libidilia_source_la_SOURCES = plugins/idilia_source.c plugins/ports_pool.c plugins/node_service_access.c plugins/sdp_utils.c plugins/queue_callbacks.c plugins/rtsp_server.c 
+plugins_libidilia_source_la_SOURCES = plugins/idilia_source.c plugins/ports_pool.c plugins/node_service_access.c plugins/sdp_utils.c plugins/queue_callbacks.c plugins/rtsp_server.c plugins/socket_utils.c
 plugins_libidilia_source_la_CFLAGS = $(plugins_cflags)
 plugins_libidilia_source_la_LDFLAGS = $(plugins_ldflags)
 plugins_libidilia_source_la_LIBADD = $(plugins_libadd)
