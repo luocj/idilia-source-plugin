@@ -5,9 +5,7 @@
 
 
 #ifdef PLI_WORKAROUND
-static void janus_source_request_keyframe(janus_source_session *session);
 static gboolean request_key_frame_cb(gpointer data);
-static gboolean request_key_frame_periodic_cb(gpointer data);
 static gboolean request_key_frame_if_not_playing_cb(gpointer data);
 #endif
 static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
@@ -257,25 +255,7 @@ gchar * janus_source_create_launch_pipe(janus_source_session * session) {
 }
 
 #ifdef PLI_WORKAROUND
-static void janus_source_request_keyframe(janus_source_session *session)
-{
 
-	if (!session) {
-		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
-		return;
-	}
-
-	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
-		return;
-	}
-
-	JANUS_LOG(LOG_INFO, "Sending a PLI to request keyframe\n");
-	char buf[12];
-	memset(buf, 0, 12);
-	janus_rtcp_pli((char *)&buf, 12);
-	gateway->relay_rtcp(session->handle, 1, buf, 12);
-}
 
 static gboolean
 request_key_frame_cb(gpointer data)
@@ -284,7 +264,7 @@ request_key_frame_cb(gpointer data)
 	return FALSE;
 }
 
-static gboolean
+gboolean
 request_key_frame_periodic_cb(gpointer data)
 {
 	janus_source_request_keyframe((janus_source_session *)data);
@@ -301,7 +281,7 @@ request_key_frame_if_not_playing_cb(gpointer data)
 		return FALSE;
 	}
 
-	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
+	if (g_atomic_int_get(&session->hangingup) || session->destroyed) {
 		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
 		return FALSE;
 	}

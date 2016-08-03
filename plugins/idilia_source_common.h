@@ -48,3 +48,7 @@ typedef struct janus_source_session {
 	idilia_codec codec[JANUS_SOURCE_STREAM_MAX];
 	gint codec_pt[JANUS_SOURCE_STREAM_MAX];
 } janus_source_session;
+
+#ifdef PLI_WORKAROUND
+void janus_source_request_keyframe(janus_source_session *session);
+#endif

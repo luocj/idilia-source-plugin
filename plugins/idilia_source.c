@@ -1330,4 +1330,25 @@ static void rtsp_callback(gpointer data) {
 	g_free(http_post);
 }
 
+#ifdef PLI_WORKAROUND
+void janus_source_request_keyframe(janus_source_session *session)
+{
+
+	if (!session) {
+		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
+		return;
+	}
+
+	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
+		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
+		return;
+	}
+
+	JANUS_LOG(LOG_INFO, "Sending a PLI to request keyframe\n");
+	char buf[12];
+	memset(buf, 0, 12);
+	janus_rtcp_pli((char *)&buf, 12);
+	gateway->relay_rtcp(session->handle, 1, buf, 12);
+}
+#endif
 
