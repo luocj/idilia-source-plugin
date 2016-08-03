@@ -1260,8 +1260,9 @@ static gchar * janus_source_do_codec_negotiation(janus_source_session * session,
 	return sdp;
 }
 
+
 #ifdef PLI_WORKAROUND
-static void janus_source_request_keyframe(janus_source_session *session)
+void janus_source_request_keyframe(janus_source_session *session)
 {
 
 	if (!session) {
