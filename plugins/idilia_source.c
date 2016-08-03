@@ -201,8 +201,7 @@ static gchar *status_service_url = NULL;
 static gint pli_period = 0;
 static gboolean use_codec_priority = FALSE;
 static idilia_codec codec_priority_list[] = { IDILIA_CODEC_INVALID, IDILIA_CODEC_INVALID };
-//static GstRTSPServer *rtsp_server;
-//GAsyncQueue *rtsp_async_queue;
+
 janus_source_rtsp_server_data *rtsp_server_data = NULL;
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
@@ -1047,10 +1046,9 @@ static gboolean janus_source_create_sockets(janus_source_socket socket[JANUS_SOU
 
 
 static void *janus_source_rtsp_server_thread(void *data) {
+	
 
-	GMainLoop *loop;
-	GstRTSPSessionPool *session_pool;
-	GList * sessions_list;	
+		
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		JANUS_LOG(LOG_INFO, "Plugin is stopping\n");
@@ -1066,19 +1064,13 @@ static void *janus_source_rtsp_server_thread(void *data) {
 	GMainContext *worker_context = g_main_context_new();
 	g_main_context_push_thread_default(worker_context);
 #endif
+	
 	/* Create new queue source */
 	janus_source_attach_rtsp_queue_callback(rtsp_server_data, queue_events_callback, g_main_context_get_thread_default());
-	
 	/* make a mainloop for the thread-default context */
-	loop = g_main_loop_new(g_main_context_get_thread_default(), FALSE);
-	rtsp_server_data->loop = loop;
-	g_main_loop_run(loop);
+	janus_source_rtsp_create_and_run_main_loop(rtsp_server_data,g_main_context_get_thread_default());
 	
-
-	session_pool = gst_rtsp_server_get_session_pool(rtsp_server_data->rtsp_server);
-	sessions_list = gst_rtsp_session_pool_filter(session_pool, janus_source_close_rtsp_sessions, NULL);
-	g_list_free_full(sessions_list, gst_object_unref);
-	g_object_unref(session_pool);
+	janus_source_close_all_rtsp_sessions(rtsp_server_data);
 
 #ifdef USE_THREAD_CONTEXT
 	g_main_context_pop_thread_default(worker_context);

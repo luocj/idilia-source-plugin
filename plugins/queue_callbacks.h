@@ -11,8 +11,6 @@ typedef struct QueueEventData {
 
 GSource *
 queue_source_new (GAsyncQueue  *queue);
-void
-queue_source_finalize (GSource *source);
 gboolean
 queue_events_callback(gpointer data);
 gboolean

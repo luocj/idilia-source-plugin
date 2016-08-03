@@ -26,7 +26,7 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 
 	guint64 session_id_tmp;
 	gchar session_id[21];
-	const char * server_ip = janus_get_local_ip();
+	const gchar * server_ip = janus_get_local_ip();
 	const gchar *proto = "IP4"; //todo: support IPV6
 
 	gst_sdp_message_new(&sdp);
@@ -257,10 +257,8 @@ gchar * janus_source_create_launch_pipe(janus_source_session * session) {
 	return launch_pipe;
 }
 
-void janus_rtsp_handle_client_callback(gpointer data) {
-	GstRTSPMountPoints *mounts;
-	GstRTSPMediaFactory *factory;
-	int rtsp_port;
+void janus_rtsp_handle_client_callback(gpointer data) {	
+	
 	janus_source_session *session = (janus_source_session*)(data); 
 	
 	if (!session) {
@@ -275,27 +273,14 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	for (int i = 0; i < JANUS_SOURCE_STREAM_MAX; i++)
 	{
 		for (int j = 0; j < JANUS_SOURCE_SOCKET_MAX; j++)
-			JANUS_LOG(LOG_VERB, "UDP port[%d][%d]: %d\n", i, j, session->socket[i][j].port);
+			JANUS_LOG(LOG_INFO, "UDP port[%d][%d]: %d\n", i, j, session->socket[i][j].port);
 	}
 
-	gst_rtsp_server_set_address(rtsp_server_data->rtsp_server, janus_get_local_ip());
-
-	factory = gst_rtsp_media_factory_new();
-
-	gst_rtsp_media_factory_set_latency(factory, 0);
-
-	gst_rtsp_media_factory_set_profiles(factory, GST_RTSP_PROFILE_AVPF);
-
-	/* store up to 100ms of retransmission data */
-	gst_rtsp_media_factory_set_retransmission_time(factory, 100 * GST_MSECOND);
-
+	GstRTSPMediaFactory *factory;	
 	gchar * launch_pipe = janus_source_create_launch_pipe(session);
-
-	gst_rtsp_media_factory_set_launch(factory, launch_pipe);
+	factory = janus_source_rtsp_factory(rtsp_server_data, janus_get_local_ip(), launch_pipe);
 	g_free(launch_pipe);
 
-	/* media created from this factory can be shared between clients */
-	gst_rtsp_media_factory_set_shared(factory, TRUE);
 
 	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
 	{
@@ -313,17 +298,12 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	g_signal_connect(rtsp_server_data->rtsp_server, "client-connected", (GCallback)client_connected_cb,
 		(gpointer)session);
 
-	/* get the default mount points from the server */
-	mounts = gst_rtsp_server_get_mount_points(rtsp_server_data->rtsp_server);
-
-	/* attach the session to the "/camera" URL */
 	gchar * uri = g_strdup_printf("/%s",session->id);
-	gst_rtsp_mount_points_add_factory(mounts, uri, factory);
-	g_object_unref(mounts);
+	janus_source_rtsp_mountpoint(rtsp_server_data, factory, uri);
 	
-	rtsp_port = gst_rtsp_server_get_bound_port(rtsp_server_data->rtsp_server);
-	
-	
+	int rtsp_port;
+	rtsp_port = janus_source_rtsp_server_port(rtsp_server_data);
+
 	session->rtsp_url = g_strdup_printf("rtsp://%s:%d%s", janus_get_local_ip(), rtsp_port, uri);
 	
 	gchar *http_post = g_strdup("POST");
