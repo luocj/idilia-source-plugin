@@ -143,6 +143,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTP_SRV].socket;
 			g_assert(socket);
 			g_object_set(udp_src_rtp, "socket", socket, NULL);
+			g_object_set(udp_src_rtp, "close-socket", FALSE, NULL);
 			g_object_unref(udp_src_rtp);
 		
 			GstElement * udpsrc_rtcp_receive = gst_bin_get_by_name(GST_BIN(bin), janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV));
@@ -151,6 +152,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_RCV_SRV].socket;
 			g_assert(socket);
 			g_object_set(udpsrc_rtcp_receive, "socket", socket, NULL);
+			g_object_set(udpsrc_rtcp_receive, "close-socket", FALSE, NULL);
 			g_object_unref(udpsrc_rtcp_receive);
 		}
 		g_object_unref(bin);
