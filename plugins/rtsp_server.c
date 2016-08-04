@@ -1,6 +1,9 @@
 #include "rtsp_server.h"
 #include "queue_callbacks.h"
 #include "gst_utils.h"
+#include "debug.h"
+
+static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
 
 void janus_source_create_rtsp_server_and_queue(janus_source_rtsp_server_data *rtsp_server, GMainContext *context){
 	rtsp_server->rtsp_server = gst_rtsp_server_new();
@@ -10,7 +13,7 @@ void janus_source_create_rtsp_server_and_queue(janus_source_rtsp_server_data *rt
 
 	/* attach the server to the thread-default context */
 	if (gst_rtsp_server_attach(rtsp_server->rtsp_server, context) == 0) {
-		g_print("Failed to attach the server\n");
+		JANUS_LOG(LOG_ERR, "Failed to attach the server\n");
 	}
 
 	rtsp_server->rtsp_async_queue =  g_async_queue_new();
@@ -72,4 +75,10 @@ void janus_source_close_all_rtsp_sessions(janus_source_rtsp_server_data *rtsp_se
 	sessions_list = gst_rtsp_session_pool_filter(session_pool, janus_source_close_rtsp_sessions, NULL);
 	g_list_free_full(sessions_list, gst_object_unref);
 	g_object_unref(session_pool);
+}
+
+static GstRTSPFilterResult
+janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data) { 
+	JANUS_LOG(LOG_INFO, "Removing RTSP session: %s\n", gst_rtsp_session_get_sessionid(session));
+	return GST_RTSP_FILTER_REMOVE;	
 }

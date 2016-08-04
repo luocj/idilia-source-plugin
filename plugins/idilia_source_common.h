@@ -4,6 +4,7 @@
 #include "socket_utils.h"
 #include "sdp_utils.h"
 #include "plugin.h"
+#include "rtsp_server.h"
 
 //#define PLI_WORKAROUND
 
@@ -56,3 +57,10 @@ typedef struct janus_source_session {
 #ifdef PLI_WORKAROUND
 void janus_source_request_keyframe(janus_source_session *session);
 #endif
+
+/* External declarations (janus.h) */
+extern gchar *janus_get_local_ip(void);
+
+/* idilia_source.c */
+extern gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
+extern janus_source_rtsp_server_data *rtsp_server_data;

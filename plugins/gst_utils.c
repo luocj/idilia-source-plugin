@@ -5,6 +5,9 @@
 #include "node_service_access.h"
 #include "rtsp_server.h"
 
+
+
+
 #ifdef PLI_WORKAROUND
 static gboolean request_key_frame_cb(gpointer data);
 static gboolean request_key_frame_if_not_playing_cb(gpointer data);
@@ -12,11 +15,10 @@ static gboolean request_key_frame_if_not_playing_cb(gpointer data);
 static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
 static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
 static const gchar * janus_source_get_udpsrc_name(int stream, int type);
+static gchar * janus_source_create_launch_pipe(janus_source_session * session);
+static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
+static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
 
-/* External declarations (janus.h) */
-extern gchar *janus_get_local_ip(void);
-extern janus_source_rtsp_server_data *rtsp_server_data;
-extern gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 
 static GstSDPMessage *
 create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
@@ -73,21 +75,19 @@ no_sdp:
 	}
 }
 
-//todo: fix
 static const gchar * janus_source_get_udpsrc_name(int stream, int type) { 
 	switch(stream)
 	{
-		case JANUS_SOURCE_STREAM_VIDEO :
+		case JANUS_SOURCE_STREAM_VIDEO:
 			switch (type)
 			{
 			case JANUS_SOURCE_SOCKET_RTP_SRV:
 				return "udpsrc_rtp_video";
 			case JANUS_SOURCE_SOCKET_RTCP_RCV_SRV:
-				return "udpsrc_rtcp_receive_video";
+				return "udpsrc_rtcp_rcv_video";
 			default:
 				break;
 			}
-
 			break ;
 
 		case JANUS_SOURCE_STREAM_AUDIO :
@@ -96,7 +96,7 @@ static const gchar * janus_source_get_udpsrc_name(int stream, int type) {
 			case JANUS_SOURCE_SOCKET_RTP_SRV:
 				return "udpsrc_rtp_audio";
 			case JANUS_SOURCE_SOCKET_RTCP_RCV_SRV:
-				return "udpsrc_rtcp_receive_audio";
+				return "udpsrc_rtcp_rcv_audio";
 			default:
 				break;
 			}
@@ -104,6 +104,9 @@ static const gchar * janus_source_get_udpsrc_name(int stream, int type) {
 		default:
 			break;
 	 }
+	
+	JANUS_LOG(LOG_ERR, "Error, not implemented!");
+	
 	return NULL;
 }
 
@@ -159,7 +162,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 	}
 }
 
-void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
+static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
 {
 	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
 	g_signal_connect(media, "target-state", (GCallback)rtsp_media_target_state_cb, data);
@@ -178,7 +181,7 @@ client_play_request_cb(GstRTSPClient  *gstrtspclient,
 }
 
 
-void
+static void
 client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
 	gpointer       data)
@@ -189,14 +192,8 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 	g_signal_connect(gstrtspclient, "play-request", (GCallback)client_play_request_cb, data);
 }
 
-GstRTSPFilterResult
-janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data) { 
-	JANUS_LOG(LOG_INFO, "Removing RTSP session: %s\n", gst_rtsp_session_get_sessionid(session));
-	return GST_RTSP_FILTER_REMOVE;	
-}
 
-
-gchar * janus_source_create_launch_pipe(janus_source_session * session) {
+static gchar * janus_source_create_launch_pipe(janus_source_session * session) {
 	gchar * launch_pipe = NULL;
 	gchar * launch_pipe_video = NULL;
 	gchar * launch_pipe_audio = NULL;
