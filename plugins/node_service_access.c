@@ -79,9 +79,11 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
     result = g_regex_split_simple ("\/",request, 0, 0); 
     if (result != NULL) {
 	json_object_set_new(object, "id", json_string(result[g_strv_length(result)-1]));
+	g_strfreev (result);
     }
 
     gchar *request_str =  json_dumps(object, JSON_PRESERVE_ORDER);
+
 
     curl_code = curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS,request_str);
     if (CURLE_OK != curl_code) {
