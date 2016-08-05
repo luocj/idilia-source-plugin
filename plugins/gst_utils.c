@@ -61,8 +61,11 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 	GstSDPMedia * sdpmedia = (GstSDPMedia *)gst_sdp_message_get_media(sdp, 0);
 	g_assert(sdpmedia);
 
+	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 ccm fir");
 	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack");
 	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack pli");
+
+
 
 	return sdp;
 
