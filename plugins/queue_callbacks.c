@@ -2,6 +2,14 @@
 
 extern GAsyncQueue *rtsp_async_queue;
 
+static GSourceFuncs source_func =
+{
+	queue_prepare,
+	NULL,
+	queue_events_dispatch,
+	NULL
+};
+
 GSource *
 queue_source_new (GAsyncQueue *queue){
     GSource *source; 
