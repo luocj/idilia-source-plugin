@@ -72,7 +72,7 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
 
 
     json_t *object = json_object();
-    json_object_set_new(object, "Source", json_string(request)); 
+    json_object_set_new(object, "uri", json_string(request)); 
 
     gchar **result;
 	    
