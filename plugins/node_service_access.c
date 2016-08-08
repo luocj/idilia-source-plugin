@@ -76,7 +76,7 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
 
     gchar **result;
 	    
-    result = g_regex_split_simple ("\/",request, 0, 0); 
+    result = g_regex_split_simple ("\\/",request, 0, 0); 
     if (result != NULL) {
 	json_object_set_new(object, "id", json_string(result[g_strv_length(result)-1]));
 	g_strfreev (result);
