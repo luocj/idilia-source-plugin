@@ -7,7 +7,7 @@ AM_CFLAGS = \
 	-Wpacked -Wpointer-arith -Wmissing-format-attribute -Wmissing-noreturn \
 	-Wnested-externs -Wstrict-prototypes -Wunsafe-loop-optimizations \
 	-Wwrite-strings -Wno-missing-field-initializers -Wno-unused-parameter \
-	-Wcast-align -Wformat-security -Wswitch-default \
+	-Wcast-align -Wformat-security -Wswitch-default -Wno-format-nonliteral \
 	-Wmissing-include-dirs -Wno-aggregate-return -Wunused-but-set-variable \
 	-Warray-bounds -Wold-style-definition -Wsign-compare -Wlarger-than=65537
 AM_CFLAGS += -Wno-undef  # sophiasip is not -Wundef--safe
