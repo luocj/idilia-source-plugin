@@ -18,14 +18,6 @@ queue_events_dispatch(GSource *source, GSourceFunc callback, gpointer user_data)
 gboolean queue_prepare(GSource *source, gint *timeout);
 
 
-static GSourceFuncs source_func =
-{
-	queue_prepare,
-	NULL,
-	queue_events_dispatch,
-	NULL
-};
-
 typedef struct {
   GSource         parent;
   GAsyncQueue    *queue;
