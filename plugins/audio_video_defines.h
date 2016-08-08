@@ -24,8 +24,10 @@
 	sess_vid.send_rtcp_src_0 ! udpsink port=%d sync=false async=false \
 	depay_vid. ! rtph264pay pt=96"
 	
-#define PIPE_AUDIO_OPUS "udpsrc name=%s ! application/x-rtp, media=audio, payload=%d, encoding-name=OPUS, clock-rate=48000, rtp-profile=3 ! .recv_rtp_sink rtpsession name=sess_aud \
-	.recv_rtp_src ! rtpopusdepay name=depay_aud \
-	udpsrc name=%s ! sess_aud.recv_rtcp_sink \
-	sess_aud.send_rtcp_src ! udpsink port=%d \
+#define PIPE_AUDIO_OPUS "rtpbin name=sess_aud rtp-profile=3 \
+	udpsrc caps=\"application/x-rtp, media=audio, payload=%d, encoding-name=OPUS, clock-rate=48000, rtp-profile=3\" name=%s \
+	! sess_aud.recv_rtp_sink_0 \
+	sess_aud. ! rtpopusdepay name=depay_aud \
+	udpsrc name=%s ! sess_aud.recv_rtcp_sink_0 \
+	sess_aud.send_rtcp_src_0 ! udpsink port=%d sync=false async=false \
 	depay_aud. ! audio/x-opus, channels=1 ! rtpopuspay pt=127"
