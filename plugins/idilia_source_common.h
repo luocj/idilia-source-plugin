@@ -58,8 +58,6 @@ typedef struct janus_source_session {
 void janus_source_request_keyframe(janus_source_session *session);
 #endif
 
-/* External declarations (janus.h) */
-extern gchar *janus_get_local_ip(void);
 
 /* idilia_source.c */
 extern gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);

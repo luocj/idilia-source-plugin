@@ -18,7 +18,7 @@ static const gchar * janus_source_get_udpsrc_name(int stream, int type);
 static gchar * janus_source_create_launch_pipe(janus_source_session * session);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
-
+extern gchar *janus_source_get_rtsp_ip(void);
 
 static GstSDPMessage *
 create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
@@ -28,7 +28,7 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 
 	guint64 session_id_tmp;
 	gchar session_id[21];
-	const gchar * server_ip = janus_get_local_ip();
+	gchar * server_ip = g_strdup(janus_source_get_rtsp_ip());
 	const gchar *proto = "IP4"; //todo: support IPV6
 
 	gst_sdp_message_new(&sdp);
@@ -66,7 +66,7 @@ create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
 	gst_sdp_media_add_attribute(sdpmedia, "rtcp-fb", "96 nack pli");
 
 
-
+	g_free(server_ip);
 	return sdp;
 
 	/* ERRORS */
@@ -278,11 +278,14 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 			JANUS_LOG(LOG_INFO, "UDP port[%d][%d]: %d\n", i, j, session->socket[i][j].port);
 	}
 
+	gchar * rtsp_ip = g_strdup(janus_source_get_rtsp_ip());
+
 	GstRTSPMediaFactory *factory;	
 	gchar * launch_pipe = janus_source_create_launch_pipe(session);
-	factory = janus_source_rtsp_factory(rtsp_server_data, janus_get_local_ip(), launch_pipe);
+	factory = janus_source_rtsp_factory(rtsp_server_data, rtsp_ip, launch_pipe);
 	g_free(launch_pipe);
 
+	g_print("Local IP used by RTSP server: %s\n", rtsp_ip);
 
 	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
 	{
@@ -306,7 +309,7 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	int rtsp_port;
 	rtsp_port = janus_source_rtsp_server_port(rtsp_server_data);
 
-	session->rtsp_url = g_strdup_printf("rtsp://%s:%d%s", janus_get_local_ip(), rtsp_port, uri);
+	session->rtsp_url = g_strdup_printf("rtsp://%s:%d%s", rtsp_ip, rtsp_port, uri);
 	
 	gchar *http_post = g_strdup("POST");
 
@@ -318,6 +321,7 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", session->rtsp_url);
 	g_free(http_post);
 	g_free(uri);
+	g_free(rtsp_ip);
 }
 
 

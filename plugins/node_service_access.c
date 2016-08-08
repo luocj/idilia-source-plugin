@@ -32,7 +32,7 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "charsets: utf-8");
    
-
+   
     curl_code = curl_easy_setopt(curl_handle, CURLOPT_URL, url);
     if (CURLE_OK != curl_code) {
     	retValue = FALSE;

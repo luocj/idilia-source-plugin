@@ -201,7 +201,7 @@ static gchar *status_service_url = NULL;
 static gint pli_period = 0;
 static gboolean use_codec_priority = FALSE;
 static idilia_codec codec_priority_list[] = { IDILIA_CODEC_INVALID, IDILIA_CODEC_INVALID };
-
+static gchar *rtsp_interface_ip = NULL;
 janus_source_rtsp_server_data *rtsp_server_data = NULL;
 //function declarations
 static void *janus_source_rtsp_server_thread(void *data);
@@ -213,14 +213,12 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 static void janus_source_parse_video_codec_priority(janus_config_item *config);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
 static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *pli_period);
+static void janus_source_parse_rtsp_interface_ip(janus_config_item *config, gchar **rtsp_interface_ip); 
 gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp);
 static idilia_codec janus_source_select_video_codec_by_priority_list(const gchar * sdp);
 static gboolean janus_source_create_sockets(janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX]);
-
-/* External declarations (janus.h) */
-extern gchar *janus_get_local_ip(void);
-extern gchar *janus_get_public_ip(void);
+gchar *janus_source_get_rtsp_ip(void);
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -322,6 +320,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
 			janus_source_parse_pli_period(janus_config_get_item(cat, "pli_period"), &pli_period);
 			janus_source_parse_video_codec_priority(janus_config_get_item(cat, "video_codec_priority"));
+			janus_source_parse_rtsp_interface_ip(janus_config_get_item(cat, "interface"),&rtsp_interface_ip);
 			
 			cl = cl->next;
 		}
@@ -428,6 +427,12 @@ void janus_source_destroy(void) {
         g_free(status_service_url);
 		status_service_url = NULL;
     }
+
+	 if (rtsp_interface_ip) {
+        g_free(rtsp_interface_ip);
+		rtsp_interface_ip = NULL;
+    }
+
 	curl_cleanup(curl_handle);
 	
 	g_atomic_int_set(&initialized, 0);
@@ -1195,8 +1200,7 @@ static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *p
 	}
 }
 
-static void janus_source_parse_video_codec_priority(janus_config_item *config)
-{
+static void janus_source_parse_video_codec_priority(janus_config_item *config) {
 	if (config && config->value)
 	{
 		char * codec2 = strrchr(config->value, ',');
@@ -1216,6 +1220,13 @@ static void janus_source_parse_video_codec_priority(janus_config_item *config)
 		use_codec_priority = FALSE;
 	}
 }
+
+static void janus_source_parse_rtsp_interface_ip(janus_config_item *config, gchar **rtsp_interface_ip) {
+	if(config && config->value){ 
+		*rtsp_interface_ip = g_strdup(config->value);
+    }
+}
+
 
 
 static idilia_codec janus_source_select_video_codec_by_priority_list(const gchar * sdp)
@@ -1251,6 +1262,11 @@ static gchar * janus_source_do_codec_negotiation(janus_source_session * session,
 	}
 	return sdp;
 }
+
+gchar *janus_source_get_rtsp_ip(void) {
+	return rtsp_interface_ip;
+}
+
 
 
 #ifdef PLI_WORKAROUND
