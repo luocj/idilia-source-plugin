@@ -228,8 +228,8 @@ static gchar * janus_source_create_launch_pipe(janus_source_session * session) {
 			break;
 		case IDILIA_CODEC_OPUS:
 			launch_pipe_audio = g_strdup_printf(PIPE_AUDIO_OPUS,
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV),
 				session->codec_pt[stream],
+				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV),
 				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV),
 				session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_SND_SRV].port);
 			break;
