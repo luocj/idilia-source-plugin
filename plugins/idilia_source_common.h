@@ -61,4 +61,5 @@ void janus_source_request_keyframe(janus_source_session *session);
 
 /* idilia_source.c */
 extern gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
+extern const gchar *janus_source_get_rtsp_ip(void);
 extern janus_source_rtsp_server_data *rtsp_server_data;

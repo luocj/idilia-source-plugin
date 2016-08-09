@@ -218,7 +218,6 @@ gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condi
 static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp);
 static idilia_codec janus_source_select_video_codec_by_priority_list(const gchar * sdp);
 static gboolean janus_source_create_sockets(janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX]);
-gchar *janus_source_get_rtsp_ip(void);
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if (!msg || msg == &exit_message)
@@ -1224,6 +1223,9 @@ static void janus_source_parse_video_codec_priority(janus_config_item *config) {
 static void janus_source_parse_rtsp_interface_ip(janus_config_item *config, gchar **rtsp_interface_ip) {
 	if(config && config->value){ 
 		*rtsp_interface_ip = g_strdup(config->value);
+    } else {
+		JANUS_LOG(LOG_WARN, "RTSP interface not configured, using localhost\n");
+		*rtsp_interface_ip = g_strdup("localhost");
     }
 }
 
@@ -1263,7 +1265,7 @@ static gchar * janus_source_do_codec_negotiation(janus_source_session * session,
 	return sdp;
 }
 
-gchar *janus_source_get_rtsp_ip(void) {
+const gchar *janus_source_get_rtsp_ip(void) {
 	return rtsp_interface_ip;
 }
 

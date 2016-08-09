@@ -16,7 +16,7 @@ void janus_source_deattach_rtsp_queue_callback(janus_source_rtsp_server_data *rt
 void janus_source_rtsp_create_and_run_main_loop(janus_source_rtsp_server_data *rtsp_server, GMainContext * context);
 
 void janus_source_create_rtsp_server_and_queue(janus_source_rtsp_server_data *rtsp_server, GMainContext *context);
-GstRTSPMediaFactory * janus_source_rtsp_factory(janus_source_rtsp_server_data *rtsp_server, gchar * local_ip, gchar * launch_pipe);
+GstRTSPMediaFactory * janus_source_rtsp_factory(janus_source_rtsp_server_data *rtsp_server, const gchar * local_ip, gchar * launch_pipe);
 void janus_source_rtsp_mountpoint(janus_source_rtsp_server_data *rtsp_server , GstRTSPMediaFactory *factory, gchar * uri);
 int janus_source_rtsp_server_port(janus_source_rtsp_server_data *rtsp_server);
 

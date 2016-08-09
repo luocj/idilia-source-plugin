@@ -19,7 +19,7 @@ void janus_source_create_rtsp_server_and_queue(janus_source_rtsp_server_data *rt
 	rtsp_server->rtsp_async_queue =  g_async_queue_new();
 }
 
-GstRTSPMediaFactory * janus_source_rtsp_factory(janus_source_rtsp_server_data *rtsp_server, gchar * local_ip, gchar * launch_pipe) {
+GstRTSPMediaFactory * janus_source_rtsp_factory(janus_source_rtsp_server_data *rtsp_server, const gchar * local_ip, gchar * launch_pipe) {
 	GstRTSPMediaFactory * factory;
 	gst_rtsp_server_set_address(rtsp_server->rtsp_server, local_ip);
 	factory = gst_rtsp_media_factory_new();
