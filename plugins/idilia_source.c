@@ -391,11 +391,8 @@ void janus_source_destroy(void) {
 
 	janus_source_deattach_rtsp_queue_callback(rtsp_server_data);
 	
-	if (g_main_loop_is_running (rtsp_server_data->loop)) {	
-		g_main_loop_quit(rtsp_server_data->loop);
-		g_main_loop_unref(rtsp_server_data->loop); 
-	}
-
+	janus_source_rtsp_clean_and_quit_main_loop(rtsp_server_data);
+	
 	if (handler_rtsp_thread != NULL) {
 		g_thread_join(handler_rtsp_thread);
 		handler_rtsp_thread = NULL;
@@ -500,7 +497,7 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	session->periodic_pli = 0;
 	session->rtsp_state = GST_STATE_NULL;
 #endif
-
+	g_atomic_int_set(&session->rtsp_session_state,GST_STATE_NULL);
 	session->bitrate = 0;	/* No limit */
 	session->destroyed = 0;
 	g_atomic_int_set(&session->hangingup, 0);
@@ -599,6 +596,7 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 	if (session->destroyed)
 		return;
 	g_atomic_int_set(&session->hangingup, 0);
+	
 	/* We really don't care, as we only send RTP/RTCP we get in the first place back anyway */
 	
 	JANUS_LOG(LOG_VERB, "video_active: %d, audio_active: %d\n", 
@@ -730,11 +728,13 @@ void janus_source_hangup_media(janus_plugin_session *handle) {
 	JANUS_LOG(LOG_INFO, "No WebRTC media anymore\n");
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
+	
 	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
 	if (!session) {
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return;
 	}
+	
 	if (session->destroyed)
 		return;
 	if (g_atomic_int_add(&session->hangingup, 1))
@@ -1120,6 +1120,8 @@ static void janus_source_close_session(janus_source_session * session) {
 
 	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL, FALSE);		    
 	
+	g_atomic_int_set(&session->rtsp_session_state,GST_STATE_PAUSED);
+
 	if (retCode != TRUE) {
 	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
 	}

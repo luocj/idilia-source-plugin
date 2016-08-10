@@ -68,6 +68,14 @@ void janus_source_rtsp_create_and_run_main_loop(janus_source_rtsp_server_data *r
 	g_main_loop_run(loop);
 }
 
+void janus_source_rtsp_clean_and_quit_main_loop(janus_source_rtsp_server_data *rtsp_server) {
+	if (g_main_loop_is_running (rtsp_server->loop)) {	
+		g_main_loop_quit(rtsp_server->loop);
+		g_main_loop_unref(rtsp_server->loop);
+		rtsp_server->loop = NULL; 
+	}
+}
+
 void janus_source_close_all_rtsp_sessions(janus_source_rtsp_server_data *rtsp_server) {
 	GList * sessions_list;
 	GstRTSPSessionPool *session_pool;

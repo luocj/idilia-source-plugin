@@ -14,6 +14,7 @@ typedef struct janus_source_rtsp_server_data
 void janus_source_attach_rtsp_queue_callback(janus_source_rtsp_server_data *rtsp_server,  GSourceFunc callback, GMainContext *context);
 void janus_source_deattach_rtsp_queue_callback(janus_source_rtsp_server_data *rtsp_server);
 void janus_source_rtsp_create_and_run_main_loop(janus_source_rtsp_server_data *rtsp_server, GMainContext * context);
+void janus_source_rtsp_clean_and_quit_main_loop(janus_source_rtsp_server_data *rtsp_server);
 
 void janus_source_create_rtsp_server_and_queue(janus_source_rtsp_server_data *rtsp_server, GMainContext *context);
 GstRTSPMediaFactory * janus_source_rtsp_factory(janus_source_rtsp_server_data *rtsp_server, const gchar * local_ip, gchar * launch_pipe);

@@ -18,6 +18,8 @@ static const gchar * janus_source_get_udpsrc_name(int stream, int type);
 static gchar * janus_source_create_launch_pipe(janus_source_session * session);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
+static gboolean new_session = FALSE; 
+
 
 static GstSDPMessage *
 create_sdp(GstRTSPClient * client, GstRTSPMedia * media)
@@ -110,11 +112,30 @@ static const gchar * janus_source_get_udpsrc_name(int stream, int type) {
 	return NULL;
 }
 
+static void rtsp_new_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data) {	
+
+	janus_source_session * session = (janus_source_session *)data;
+		 
+	if (!session) {
+		JANUS_LOG(LOG_ERR, "rtsp_new_state_cb: session is NULL\n");
+		return;
+	}else {
+		JANUS_LOG(LOG_VERB,"rtsp_new_state_cb  %s\n",gst_element_state_get_name((GstState)state));		
+		g_atomic_int_set(&session->rtsp_session_state,state);
+	}
+}
+
+static void rtsp_removed_stream_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data) {
+	JANUS_LOG(LOG_VERB, "***rtsp_removed_stream_cb: %d \n", (GstState)state);
+}
+
 static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data)
 {
-	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %d\n", (GstState)state);
+	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
+
 	janus_source_session * session = (janus_source_session *)data;
 	
+	 
 	if (!session) {
 		JANUS_LOG(LOG_ERR, "rtsp_media_target_state_cb: session is NULL\n");
 		return;
@@ -130,42 +151,64 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 		g_timeout_add(2000, request_key_frame_if_not_playing_cb, data); 
 	}
 #endif
-
-	if (state == GST_STATE_PAUSED) {
+	
+	if (state == GST_STATE_PAUSED && session->rtsp_session_state == GST_STATE_PAUSED && new_session == TRUE ) {
+		
+		JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb if: %s %d\n", gst_element_state_get_name((GstState)state),new_session);
 		GstElement * bin = NULL;
 		GSocket * socket = NULL;
-
 		bin = gst_rtsp_media_get_element(gstrtspmedia);
 		g_assert(bin);
 		
 		for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
 		{
-			GstElement * udp_src_rtp = gst_bin_get_by_name(GST_BIN(bin), janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV));
+			GstElement * udp_src_rtp = gst_bin_get_by_name(GST_BIN(bin), janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV));			
+
 			g_assert(udp_src_rtp);
 		
-			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTP_SRV].socket;
-			g_assert(socket);
-			g_object_set(udp_src_rtp, "socket", socket, NULL);
-			g_object_set(udp_src_rtp, "close-socket", FALSE, NULL);
-			g_object_unref(udp_src_rtp);
+			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTP_SRV].socket;			
+			if(socket) {
+				g_assert(socket);
+				g_object_set(udp_src_rtp, "socket", socket, NULL);
+				g_object_set(udp_src_rtp, "close-socket", FALSE, NULL);
+				g_object_unref(udp_src_rtp);
+			}
 		
 			GstElement * udpsrc_rtcp_receive = gst_bin_get_by_name(GST_BIN(bin), janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV));
+			
 			g_assert(udpsrc_rtcp_receive);
 		
 			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_RCV_SRV].socket;
-			g_assert(socket);
-			g_object_set(udpsrc_rtcp_receive, "socket", socket, NULL);
-			g_object_set(udpsrc_rtcp_receive, "close-socket", FALSE, NULL);
-			g_object_unref(udpsrc_rtcp_receive);
+			if(socket) {
+				g_assert(socket);
+				g_object_set(udpsrc_rtcp_receive, "socket", socket, NULL);
+				g_object_set(udpsrc_rtcp_receive, "close-socket", FALSE, NULL);
+				g_object_unref(udpsrc_rtcp_receive);					
+			}			
 		}
+
 		g_object_unref(bin);
+		 
 	}
+		
 }
 
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
 {
 	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
+	janus_source_session * session = (janus_source_session *)data;
+		 
+	if (!session) {
+		JANUS_LOG(LOG_ERR, "media_configure_cb: session is NULL\n");
+		return;
+	}
+	else {
+		g_atomic_int_set(&session->rtsp_session_state,GST_STATE_PAUSED);
+	}
+	
 	g_signal_connect(media, "target-state", (GCallback)rtsp_media_target_state_cb, data);
+	g_signal_connect(media, "new-state", (GCallback)rtsp_new_state_cb, data);
+	g_signal_connect(media, "removed-stream", (GCallback)rtsp_removed_stream_cb, data);
 }
 
 static void
@@ -180,16 +223,45 @@ client_play_request_cb(GstRTSPClient  *gstrtspclient,
 #endif
 }
 
+static void
+client_new_session_cb(GstRTSPClient  *gstrtspclient,
+	GstRTSPContext *rtspcontext,
+	gpointer        data)
+{
+	JANUS_LOG(LOG_VERB, "client_new_session_cb\n");	
+}
+
+static void
+client_pause_request_cb(GstRTSPClient  *gstrtspclient,
+	GstRTSPContext *rtspcontext,
+	gpointer        data)
+{
+	JANUS_LOG(LOG_VERB, "client_pause_request_cb\n");	
+	new_session = FALSE;
+}
+
+static void
+client_setup_request_cb(GstRTSPClient  *gstrtspclient,
+	GstRTSPContext *rtspcontext,
+	gpointer        data)
+{
+	JANUS_LOG(LOG_VERB, "client_setup_request_cb\n");	
+}
+
 
 static void
 client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
 	gpointer       data)
 {
+	JANUS_LOG(LOG_INFO, "New client connected\n");	
 	GstRTSPClientClass *klass = GST_RTSP_CLIENT_GET_CLASS(gstrtspclient);
 	klass->create_sdp = create_sdp;
-	JANUS_LOG(LOG_INFO, "New client connected\n");		
+	new_session = TRUE;		
 	g_signal_connect(gstrtspclient, "play-request", (GCallback)client_play_request_cb, data);
+	g_signal_connect(gstrtspclient, "new-session",(GCallback)client_new_session_cb, data);
+	g_signal_connect(gstrtspclient, "pause-request",(GCallback)client_pause_request_cb, data);
+	g_signal_connect(gstrtspclient, "setup-request",(GCallback)client_setup_request_cb, data);
 }
 
 
@@ -296,6 +368,7 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 
 	g_signal_connect(factory, "media-configure", (GCallback)media_configure_cb,
 		(gpointer)session);
+
 
 	g_signal_connect(rtsp_server_data->rtsp_server, "client-connected", (GCallback)client_connected_cb,
 		(gpointer)session);

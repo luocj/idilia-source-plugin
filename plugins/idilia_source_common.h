@@ -44,6 +44,7 @@ typedef struct janus_source_session {
 	gchar * id; /* stream id */
 	CURL *curl_handle;	
 	gchar *status_service_url;
+	GstState rtsp_session_state;
 #ifdef PLI_WORKAROUND
 	gint periodic_pli;
 	GstState rtsp_state;
