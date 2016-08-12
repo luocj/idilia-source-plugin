@@ -1,6 +1,6 @@
 [general]
 udp_port_range = 50000-55000
-pli_period = 10000
+
 ;video_codec_priority = VP8,H264 ; codec priority, when disabled plugin will not modify client's codec priority
 
 [status-service]

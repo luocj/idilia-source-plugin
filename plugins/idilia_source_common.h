@@ -6,7 +6,7 @@
 #include "plugin.h"
 #include "rtsp_server.h"
 
-//#define PLI_WORKAROUND
+
 
 enum
 {
@@ -24,7 +24,7 @@ enum
 	JANUS_SOURCE_SOCKET_RTCP_SND_SRV,
 	JANUS_SOURCE_SOCKET_MAX
 };
-
+  
 typedef struct rtcp_callback_data
 {
 	gpointer * session;
@@ -45,22 +45,16 @@ typedef struct janus_source_session {
 	CURL *curl_handle;	
 	gchar *status_service_url;
 	GstState rtsp_session_state;
-#ifdef PLI_WORKAROUND
-	gint periodic_pli;
-	GstState rtsp_state;
-#endif
 	janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX];
 	janus_source_rtcp_cbk_data rtcp_cbk_data[JANUS_SOURCE_STREAM_MAX];
 	idilia_codec codec[JANUS_SOURCE_STREAM_MAX];
 	gint codec_pt[JANUS_SOURCE_STREAM_MAX];
 } janus_source_session;
 
-#ifdef PLI_WORKAROUND
-void janus_source_request_keyframe(janus_source_session *session);
-#endif
-
 
 /* idilia_source.c */
 extern gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 extern const gchar *janus_source_get_rtsp_ip(void);
+extern void janus_source_hangup_media(janus_plugin_session *handle);
+extern void janus_source_send_id_error(janus_plugin_session *handle); 
 extern janus_source_rtsp_server_data *rtsp_server_data;

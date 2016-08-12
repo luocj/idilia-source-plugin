@@ -134,7 +134,9 @@ void janus_source_slow_link(janus_plugin_session *handle, int uplink, int video)
 void janus_source_hangup_media(janus_plugin_session *handle);
 void janus_source_destroy_session(janus_plugin_session *handle, int *error);
 char *janus_source_query_session(janus_plugin_session *handle);
+void janus_source_send_id_error(janus_plugin_session *handle) ;
 extern gboolean queue_events_callback(gpointer data);
+
 /* Plugin setup */
 static janus_plugin janus_source_plugin =
 JANUS_PLUGIN_INIT(
@@ -198,7 +200,6 @@ static const char * gst_debug_str = "*:3"; //gst debug setting
 /* configuration options */
 static uint16_t udp_min_port = 0, udp_max_port = 0;
 static gchar *status_service_url = NULL;
-static gint pli_period = 0;
 static gboolean use_codec_priority = FALSE;
 static idilia_codec codec_priority_list[] = { IDILIA_CODEC_INVALID, IDILIA_CODEC_INVALID };
 static gchar *rtsp_interface_ip = NULL;
@@ -212,7 +213,6 @@ static void janus_source_relay_rtcp(janus_source_session *session, int video, ch
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
 static void janus_source_parse_video_codec_priority(janus_config_item *config);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
-static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *pli_period);
 static void janus_source_parse_rtsp_interface_ip(janus_config_item *config, gchar **rtsp_interface_ip); 
 gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp);
@@ -242,7 +242,7 @@ static void janus_source_message_free(janus_source_message *msg) {
 #define JANUS_SOURCE_ERROR_NO_MESSAGE		411
 #define JANUS_SOURCE_ERROR_INVALID_JSON		412
 #define JANUS_SOURCE_ERROR_INVALID_ELEMENT	413
-
+#define JANUS_SOURCE_ERROR_INVALID_URL_ID	414
 
 /* SourcePlugin watchdog/garbage collector (sort of) */
 void *janus_source_watchdog(void *data);
@@ -317,7 +317,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			JANUS_LOG(LOG_VERB, "Parsing category '%s'\n", cat->name);
 			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
 			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
-			janus_source_parse_pli_period(janus_config_get_item(cat, "pli_period"), &pli_period);
+			
 			janus_source_parse_video_codec_priority(janus_config_get_item(cat, "video_codec_priority"));
 			janus_source_parse_rtsp_interface_ip(janus_config_get_item(cat, "interface"),&rtsp_interface_ip);
 			
@@ -493,10 +493,6 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 		session->codec_pt[stream] = -1;
 	}
 
-#ifdef PLI_WORKAROUND
-	session->periodic_pli = 0;
-	session->rtsp_state = GST_STATE_NULL;
-#endif
 	g_atomic_int_set(&session->rtsp_session_state,GST_STATE_NULL);
 	session->bitrate = 0;	/* No limit */
 	session->destroyed = 0;
@@ -609,12 +605,6 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 
 	g_async_queue_push(rtsp_server_data->rtsp_async_queue, queue_event_data) ;
 	g_main_context_wakeup(NULL) ;
-
-#ifdef PLI_WORKAROUND
-	if (pli_period > 0) {
-		session->periodic_pli = g_timeout_add(pli_period, request_key_frame_periodic_cb, (gpointer)session);
-	}
-#endif
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -891,8 +881,7 @@ static void *janus_source_handler(void *data) {
 			}
 		}
 		if(id) {
-			session->id = g_strdup(json_string_value(id));
-			JANUS_LOG(LOG_INFO, "id : %s\n",session->id);
+			session->id = g_strdup(json_string_value(id));			
 		}
 
 
@@ -1050,9 +1039,6 @@ static gboolean janus_source_create_sockets(janus_source_socket socket[JANUS_SOU
 
 
 static void *janus_source_rtsp_server_thread(void *data) {
-	
-
-		
 
 	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
 		JANUS_LOG(LOG_INFO, "Plugin is stopping\n");
@@ -1118,7 +1104,7 @@ static void janus_source_close_session(janus_source_session * session) {
 	gchar *session_id = g_strdup(session->db_entry_session_id);
 	gchar *curl_str = g_strdup_printf("%s/%s", status_service_url, session_id);	
 
-	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL, FALSE);		    
+	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL);		    
 	
 	g_atomic_int_set(&session->rtsp_session_state,GST_STATE_PAUSED);
 
@@ -1142,11 +1128,6 @@ static void janus_source_close_session(janus_source_session * session) {
 		}
 	}
 
-#ifdef PLI_WORKAROUND
-	if (session->periodic_pli) {
-		g_source_remove(session->periodic_pli);
-	}
-#endif
 
 	if (session->db_entry_session_id != NULL) {
 		g_free(session->db_entry_session_id);
@@ -1182,7 +1163,7 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 		}
 		if (*max_port == 0)
 			*max_port = 65535;
-		JANUS_LOG(LOG_INFO, "UDP port range: %u - %u\n", *min_port, *max_port);
+		JANUS_LOG(LOG_VERB, "UDP port range: %u - %u\n", *min_port, *max_port);
 	}
 }
 
@@ -1193,13 +1174,6 @@ static void janus_source_parse_status_service_url(janus_config_item *config_url,
     }
 }
 
-static void janus_source_parse_pli_period(janus_config_item *config_pli, gint *pli_period) {
-	if (config_pli && config_pli->value) {
-		*pli_period = atoi(config_pli->value);
-	} else {
-		*pli_period = 0;
-	}
-}
 
 static void janus_source_parse_video_codec_priority(janus_config_item *config) {
 	if (config && config->value)
@@ -1271,26 +1245,32 @@ const gchar *janus_source_get_rtsp_ip(void) {
 	return rtsp_interface_ip;
 }
 
-
-
-#ifdef PLI_WORKAROUND
-void janus_source_request_keyframe(janus_source_session *session)
-{
-
+void janus_source_send_id_error(janus_plugin_session *handle) {
+	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
+		return;
+	
+	janus_source_session *session = (janus_source_session *)handle->plugin_handle;
 	if (!session) {
-		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
+		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return;
 	}
-
-	if (g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
+	
+	if (session->destroyed)
 		return;
-	}
 
-	JANUS_LOG(LOG_INFO, "Sending a PLI to request keyframe\n");
-	char buf[12];
-	memset(buf, 0, 12);
-	janus_rtcp_pli((char *)&buf, 12);
-	gateway->relay_rtcp(session->handle, 1, buf, 12);
+	/* Send an event to the browser and tell it's over */
+	char *error_cause = g_malloc0(512);
+	g_snprintf(error_cause, 512, "JSON error: URL ID %s already exist in the system.",session->id);
+	json_t *event = json_object();
+	json_object_set_new(event, "source", json_string("event"));
+	json_object_set_new(event, "error_code", json_integer(JANUS_SOURCE_ERROR_INVALID_URL_ID));
+	json_object_set_new(event, "error", json_string(error_cause));
+	char *event_text = json_dumps(event, JSON_INDENT(3) | JSON_PRESERVE_ORDER);
+	json_decref(event);
+	JANUS_LOG(LOG_VERB, "Pushing event: %s\n", event_text);
+	int ret = gateway->push_event(handle, &janus_source_plugin, NULL, event_text, NULL, NULL);
+	JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
+	g_free(event_text);	
 }
-#endif
+
+

@@ -6,18 +6,13 @@
 #include "rtsp_server.h"
 
 
-
-
-#ifdef PLI_WORKAROUND
-static gboolean request_key_frame_cb(gpointer data);
-static gboolean request_key_frame_if_not_playing_cb(gpointer data);
-#endif
 static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
 static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
 static const gchar * janus_source_get_udpsrc_name(int stream, int type);
 static gchar * janus_source_create_launch_pipe(janus_source_session * session);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
+static gchar *janus_source_create_json_request(gchar *request);
 static gboolean new_session = FALSE; 
 
 
@@ -131,7 +126,7 @@ static void rtsp_removed_stream_cb(GstRTSPMedia *gstrtspmedia, gint state, gpoin
 
 static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data)
 {
-	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
+	JANUS_LOG(LOG_VERB, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
 
 	janus_source_session * session = (janus_source_session *)data;
 	
@@ -140,21 +135,9 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 		JANUS_LOG(LOG_ERR, "rtsp_media_target_state_cb: session is NULL\n");
 		return;
 	}
-
-#ifdef PLI_WORKAROUND
-
-	g_atomic_int_set(&session->rtsp_state, state);
-	
-	if (state == GST_STATE_PAUSED) {
-		janus_source_request_keyframe(data);
-		/* ensure after 2s if keyframe was really obtained and pipeline switched into PLAYING */
-		g_timeout_add(2000, request_key_frame_if_not_playing_cb, data); 
-	}
-#endif
 	
 	if (state == GST_STATE_PAUSED && session->rtsp_session_state == GST_STATE_PAUSED && new_session == TRUE ) {
-		
-		JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb if: %s %d\n", gst_element_state_get_name((GstState)state),new_session);
+				
 		GstElement * bin = NULL;
 		GSocket * socket = NULL;
 		bin = gst_rtsp_media_get_element(gstrtspmedia);
@@ -195,7 +178,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, g
 
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
 {
-	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
+	JANUS_LOG(LOG_VERB, "media_configure callback\n") ;
 	janus_source_session * session = (janus_source_session *)data;
 		 
 	if (!session) {
@@ -216,11 +199,7 @@ client_play_request_cb(GstRTSPClient  *gstrtspclient,
 	GstRTSPContext *rtspcontext,
 	gpointer        data)
 {
-	JANUS_LOG(LOG_INFO, "client_play_request_cb\n");
-#ifdef PLI_WORKAROUND
-	//give clients some time to start collecting data
-	g_timeout_add(1000, request_key_frame_cb, data) ;
-#endif
+	JANUS_LOG(LOG_VERB, "client_play_request_cb\n");
 }
 
 static void
@@ -254,7 +233,7 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
 	gpointer       data)
 {
-	JANUS_LOG(LOG_INFO, "New client connected\n");	
+	JANUS_LOG(LOG_VERB, "New client connected\n");	
 	GstRTSPClientClass *klass = GST_RTSP_CLIENT_GET_CLASS(gstrtspclient);
 	klass->create_sdp = create_sdp;
 	new_session = TRUE;		
@@ -344,7 +323,7 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	for (int i = 0; i < JANUS_SOURCE_STREAM_MAX; i++)
 	{
 		for (int j = 0; j < JANUS_SOURCE_SOCKET_MAX; j++)
-			JANUS_LOG(LOG_INFO, "UDP port[%d][%d]: %d\n", i, j, session->socket[i][j].port);
+			JANUS_LOG(LOG_VERB, "UDP port[%d][%d]: %d\n", i, j, session->socket[i][j].port);
 	}
 
 	const gchar * rtsp_ip = janus_source_get_rtsp_ip();
@@ -353,8 +332,6 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	gchar * launch_pipe = janus_source_create_launch_pipe(session);
 	factory = janus_source_rtsp_factory(rtsp_server_data, rtsp_ip, launch_pipe);
 	g_free(launch_pipe);
-
-	g_print("Local IP used by RTSP server: %s\n", rtsp_ip);
 
 	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
 	{
@@ -366,71 +343,82 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 			(gpointer)&session->rtcp_cbk_data[stream]);
 	}
 
-	g_signal_connect(factory, "media-configure", (GCallback)media_configure_cb,
-		(gpointer)session);
-
-
-	g_signal_connect(rtsp_server_data->rtsp_server, "client-connected", (GCallback)client_connected_cb,
-		(gpointer)session);
-
+	int rtsp_port = 0;
 	gchar * uri = g_strdup_printf("/%s",session->id);
-	janus_source_rtsp_mountpoint(rtsp_server_data, factory, uri);
-	
-	int rtsp_port;
 	rtsp_port = janus_source_rtsp_server_port(rtsp_server_data);
 
 	session->rtsp_url = g_strdup_printf("rtsp://%s:%d%s", rtsp_ip, rtsp_port, uri);
 	
-	gchar *http_post = g_strdup("POST");
+	gchar *http_request_data = janus_source_create_json_request(session->rtsp_url);
+	const gchar *HTTP_POST = "POST";
+	json_t *db_id_json_object = NULL;
 
-	gboolean retCode = curl_request(session->curl_handle, session->status_service_url, session->rtsp_url, http_post, &(session->db_entry_session_id), TRUE);
+	gboolean retCode = curl_request(session->curl_handle, session->status_service_url, http_request_data, HTTP_POST, &db_id_json_object);
 	if (retCode != TRUE) {
-		JANUS_LOG(LOG_ERR, "Could not send the request to the server\n");
+		JANUS_LOG(LOG_ERR, "Could not send the request to the server\n");		
+	}
+	else {
+		if (!json_is_object(db_id_json_object)) {
+			JANUS_LOG(LOG_ERR, "Not valid json object.\n");				
+		}	
+		else
+		{			
+			const gchar *DUPLICATE_FIELD_ERR_CODE = "11000";
+			const gchar *DB_ERROR_CODE_FIELD = "code";
+
+			gint code_err = json_integer_value(json_object_get(db_id_json_object,DB_ERROR_CODE_FIELD));
+
+			if(code_err != 0){
+            	gchar *code_error_string = g_strdup_printf("%d",code_err);
+				if(0 == g_strcmp0(DUPLICATE_FIELD_ERR_CODE,code_error_string)){
+					JANUS_LOG(LOG_ERR, "The mountpoint %s already exist in the system\n",uri);
+					janus_source_hangup_media(session->handle);		
+					janus_source_send_id_error(session->handle);							
+				} 
+				g_free(code_error_string);
+			}
+			else {
+				const gchar *MEDIA_CONFIGURE_CB = "media-configure";
+				const gchar *CLIENT_CONNECTED_CB = "client-connected";
+				const gchar *DB_FIELD_ID = "_id";	
+
+				g_signal_connect(factory, MEDIA_CONFIGURE_CB, (GCallback)media_configure_cb, (gpointer)session);
+
+				g_signal_connect(rtsp_server_data->rtsp_server, CLIENT_CONNECTED_CB, (GCallback)client_connected_cb, (gpointer)session);
+					
+				janus_source_rtsp_mountpoint(rtsp_server_data, factory, uri);
+				
+				session->db_entry_session_id = (gchar *) g_strdup(json_string_value(json_object_get(db_id_json_object,DB_FIELD_ID)));
+				JANUS_LOG(LOG_INFO, "Stream ready at %s\n", session->rtsp_url);
+			}
+		}
+		json_decref(db_id_json_object);
 	}
 
-	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", session->rtsp_url);
-	g_free(http_post);
+	g_free(http_request_data);
 	g_free(uri);
 }
 
 
-#ifdef PLI_WORKAROUND
-static gboolean
-request_key_frame_cb(gpointer data)
+gchar *janus_source_create_json_request(gchar *request)
 {
-	janus_source_request_keyframe((janus_source_session *)data);
-	return FALSE;
+	json_t *object = json_object();
+	const gchar *URI = "uri";
+	const gchar *REGEX_PATTERN = "\\/";
+	const gchar *ID_JSON_FIELD = "id";
+
+    json_object_set_new(object, URI, json_string(request)); 
+
+    gchar **result;
+	    
+    result = g_regex_split_simple (REGEX_PATTERN,request, 0, 0); 
+    if (result != NULL) {
+		json_object_set_new(object, ID_JSON_FIELD, json_string(result[g_strv_length(result)-1]));
+		g_strfreev (result);
+    }
+
+    gchar *request_str = json_dumps(object, JSON_PRESERVE_ORDER);
+	 
+    json_decref(object);
+	return request_str;
 }
-
-gboolean
-request_key_frame_periodic_cb(gpointer data)
-{
-	janus_source_request_keyframe((janus_source_session *)data);
-	return TRUE;
-}
-
-static gboolean
-request_key_frame_if_not_playing_cb(gpointer data)
-{
-	janus_source_session * session = (janus_source_session *)data;
-
-	if (!session) {
-		JANUS_LOG(LOG_ERR, "keyframe_once_cb: session is NULL\n");
-		return FALSE;
-	}
-
-	if (g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_VERB, "Keyframe generation event while plugin or session is stopping\n");
-		return FALSE;
-	}
-
-	if (g_atomic_int_get(&session->rtsp_state) == GST_STATE_PAUSED) {
-		JANUS_LOG(LOG_INFO, "State is GST_STATE_PAUSED; sendig pli and schedulling check\n");
-		janus_source_request_keyframe(data);
-		/* call this callback again, as we are still in PAUSED state */
-		return TRUE;
-	}
-
-	return FALSE;
-}
-#endif

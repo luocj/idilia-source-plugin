@@ -7,4 +7,4 @@
 CURL * curl_init(void);
 void curl_cleanup(CURL *curl_handle);
 
-gboolean  curl_request(CURL *curl_handle,const gchar *url, const gchar *request, const gchar*requestType, gchar ** db_entry_ida, gboolean ispost);
+gboolean  curl_request(CURL *curl_handle,const gchar *url, const gchar *request, const gchar*requestType, json_t ** db_entry_ida);
