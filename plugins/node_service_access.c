@@ -38,6 +38,18 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
     }
 
 
+
+    curl_code = curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST,requestType);
+    if(CURLE_OK != curl_code){
+	    retValue = FALSE;
+    }
+
+    curl_code = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    if (CURLE_OK != curl_code) {
+	    retValue = FALSE;
+    }
+				         
+
     curl_code = curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST,requestType);
     if(CURLE_OK != curl_code){
 	    retValue = FALSE;
