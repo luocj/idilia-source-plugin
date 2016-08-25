@@ -39,12 +39,12 @@ gboolean curl_request(CURL *curl_handle,const gchar *url, const gchar *request, 
 
 
 
-    curl_code = curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST,requestType);
+    curl_code = curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT , 10);
     if(CURLE_OK != curl_code){
 	    retValue = FALSE;
     }
 
-    curl_code = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_code = curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 0L);
     if (CURLE_OK != curl_code) {
 	    retValue = FALSE;
     }
