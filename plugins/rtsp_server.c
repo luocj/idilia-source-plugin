@@ -3,13 +3,14 @@
 #include "gst_utils.h"
 #include "debug.h"
 
+static const char *RTSP_PORT_NUMBER = "3554"; 
 static GstRTSPFilterResult janus_source_close_rtsp_sessions(GstRTSPSessionPool *pool, GstRTSPSession *session, gpointer data);
 
 void janus_source_create_rtsp_server_and_queue(janus_source_rtsp_server_data *rtsp_server, GMainContext *context){
 	rtsp_server->rtsp_server = gst_rtsp_server_new();
 	
 	/* Allocate random port */
-	gst_rtsp_server_set_service(rtsp_server->rtsp_server, "554");
+	gst_rtsp_server_set_service(rtsp_server->rtsp_server, RTSP_PORT_NUMBER);
 
 	/* attach the server to the thread-default context */
 	if (gst_rtsp_server_attach(rtsp_server->rtsp_server, context) == 0) {
