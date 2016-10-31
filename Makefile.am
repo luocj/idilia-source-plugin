@@ -22,6 +22,12 @@ AM_CFLAGS += -fstack-protector-all -g -ggdb -fPIC -rdynamic -pthread
 # FIXME: make docs work with distcheck
 DISTCHECK_CONFIGURE_FLAGS = --disable-docs --enable-post-processing
 
+confdir = $(sysconfdir)/janus
+conf_DATA = $(NULL)
+
+plugindir = $(libdir)/janus/plugins
+plugin_LTLIBRARIES = $(NULL)
+
 %.sample: %.sample.in
 	$(MKDIR_P) $(@D)
 	$(AM_V_GEN) sed -e "\

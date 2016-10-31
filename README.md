@@ -1,6 +1,6 @@
 # idilia-source-plugin
 
-Source plugin for <b>Janus WebRTC Gateway v0.1.1</b> based on orginal echotest plugin. This source plugin incorporates GStreamer Multimedia Framework at the backend and implements RTSP server.
+Source plugin for <b>Janus WebRTC Gateway v0.2.0</b> based on orginal echotest plugin. This source plugin incorporates GStreamer Multimedia Framework at the backend and implements RTSP server.
 
 ## Building instructions
 

@@ -1,4 +1,4 @@
-AC_INIT([Janus Gateway],[0.1.0],[https://github.com/meetecho/janus-gateway],[janus-gateway],[https://janus.conf.meetecho.com])
+AC_INIT([Janus Gateway],[0.2.0],[https://github.com/meetecho/janus-gateway],[janus-gateway],[https://janus.conf.meetecho.com])
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -18,7 +18,7 @@ LT_INIT
 case "$host_os" in
 darwin*)
 	CFLAGS="$CFLAGS -I/usr/local/opt/openssl/include"
-	LDFLAGS="$LDFLAGS -L/usr/local/lib -L/usr/local/opt/openssl/lib"
+	LDFLAGS="$LDFLAGS -L/usr/local/lib -L/usr/local/opt/openssl/lib -L/opt/local/lib"
 	AM_CONDITIONAL([DARWIN_OS], true)
 	AM_CONDITIONAL([HAS_DTLS_WINDOW_SIZE], false)
 ;;
@@ -64,6 +64,12 @@ AC_ARG_ENABLE([rabbitmq],
               [],
               [enable_rabbitmq=yes])
 
+AC_ARG_ENABLE([mqtt],
+              [AS_HELP_STRING([--disable-mqtt],
+                              [Disable MQTT integration])],
+              [],
+              [enable_mqtt=yes])
+
 AC_ARG_ENABLE([unix-sockets],
               [AS_HELP_STRING([--disable-unix-sockets],
                               [Disable Unix Sockets integration])],
@@ -75,6 +81,12 @@ AC_ARG_ENABLE([boringssl],
                               [Use BoringSSL instead of OpenSSL])],
               [],
               [enable_boringssl=no])
+
+AC_ARG_ENABLE([dtls-settimeout],
+              [AS_HELP_STRING([--enable-dtls-settimeout],
+                              [Use DTLSv1_set_initial_timeout_duration (only available in recent BoringSSL versions)])],
+              [],
+              [enable_dtls_settimeout=no])
 
 AC_ARG_ENABLE([turn-rest-api],
               [AS_HELP_STRING([--disable-turn-rest-api],
@@ -90,6 +102,8 @@ PKG_CHECK_MODULES([JANUS],
                     libssl >= $ssl_version
                     libcrypto
                     sofia-sip-ua
+                    gstreamer-1.0
+                    gstreamer-rtsp-server-1.0
                   ])
 JANUS_MANUAL_LIBS+=" -lm"
 AC_SUBST(JANUS_MANUAL_LIBS)
@@ -101,11 +115,17 @@ AS_IF([test "x$enable_boringssl" = "xyes"],
        AC_SUBST(BORINGSSL_CFLAGS)
 	   BORINGSSL_LIBS=" -L/opt/boringssl/lib";
        AC_SUBST(BORINGSSL_LIBS)
-	   AC_CHECK_HEADERS([openssl/opensslfeatures.h],
+	   AC_CHECK_HEADERS([openssl/opensslconf.h],
 	                    [],
 	                    [AC_MSG_ERROR([BoringSSL headers not found in /opt/boringssl, use --disable-boringssl if you want to use OpenSSL instead])])
       ])
 AM_CONDITIONAL([ENABLE_BORINGSSL], [test "x$enable_boringssl" = "xyes"])
+
+AS_IF([test "x$enable_dtls_settimeout" = "xyes"],
+      [
+      AC_DEFINE(HAVE_DTLS_SETTIMEOUT)
+      AC_MSG_NOTICE([Assuming DTLSv1_set_initial_timeout_duration is available])
+      ])
 
 AC_CHECK_LIB([nice],
              [nice_agent_set_port_range],
@@ -246,7 +266,20 @@ AC_CHECK_LIB([rabbitmq],
                AS_IF([test "x$enable_rabbitmq" = "xyes"],
                      [AC_MSG_ERROR([rabbitmq-c not found. See README.md for installation instructions or use --disable-rabbitmq])])
              ])
+AC_CHECK_LIB([paho-mqtt3a],
+             [MQTTAsync_create],
+             [
+               AS_IF([test "x$enable_mqtt" = "xyes"],
+               [
+                  AC_DEFINE(HAVE_MQTT)
+               ])
+             ],
+             [
+               AS_IF([test "x$enable_mqtt" = "xyes"],
+                     [AC_MSG_ERROR([paho c client not found. See README.md for installation instructions or use --disable-mqtt])])
+             ])
 AM_CONDITIONAL([ENABLE_RABBITMQ], [test "x$enable_rabbitmq" = "xyes"])
+AM_CONDITIONAL([ENABLE_MQTT], [test "x$enable_mqtt" = "xyes"])
 
 AC_TRY_COMPILE([
                #include <stdlib.h>
