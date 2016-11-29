@@ -1,6 +1,7 @@
 /*! \file   idilia_source.c
 * \author Lorenzo Miniero <lorenzo@meetecho.com>
 *         Tomasz Zajac <tomasz.zajac@motorolasolutions.com>
+*         Sebastian Czarny <s.czarny@motorolasolutions.com>
 * \copyright GNU General Public License v3m
 * \brief  Idilia source plugin
 * \details  This is a trivial SourcePlugin for Janus, just used to
@@ -176,6 +177,7 @@ static janus_callbacks *gateway = NULL;
 static GThread *handler_thread;
 static GThread *watchdog;
 static GThread *handler_rtsp_thread;
+static GThread *keepalive;
 static void *janus_source_handler(void *data);
 
 
@@ -192,12 +194,14 @@ static janus_source_message exit_message;
 static GHashTable *sessions;
 static GList *old_sessions;
 static janus_mutex sessions_mutex;
+static janus_mutex keepalive_mutex;
 static GHashTable *sessions;
 static CURL *curl_handle = NULL;
 static const char * gst_debug_str = "*:3"; //gst debug setting
 
 /* configuration options */
 static uint16_t udp_min_port = 0, udp_max_port = 0;
+static uint64_t keepalive_interval = 5000000; //5sec keepalive default interval
 static gchar *status_service_url = NULL;
 static gboolean use_codec_priority = FALSE;
 static idilia_codec codec_priority_list[] = { IDILIA_CODEC_INVALID, IDILIA_CODEC_INVALID };
@@ -210,6 +214,7 @@ static void janus_source_close_session(janus_source_session * session);
 static void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len);
 static void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len);
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t * udp_min_port, uint16_t * udp_max_port);
+static void janus_source_parse_keepalive_interval(janus_config_item *config_keepalive_interval, uint64_t *interval);
 static void janus_source_parse_video_codec_priority(janus_config_item *config);
 static void janus_source_parse_status_service_url(janus_config_item *config_url, gchar **url);
 static void janus_source_parse_rtsp_interface_ip(janus_config_item *config, gchar **rtsp_interface_ip); 
@@ -282,6 +287,24 @@ void *janus_source_watchdog(void *data) {
 	return NULL;
 }
 
+/* SourcePlugin keepalive (sort of) */
+void *janus_source_keepalive(void *data);
+void *janus_source_keepalive(void *data) {
+	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive started\n");
+	gint64 now = 0;
+	while (g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
+		janus_mutex_lock(&keepalive_mutex);
+		/* Iterate on all the sessions */
+		now = janus_get_monotonic_time();
+		
+		}
+		janus_mutex_unlock(&keepalive_mutex);
+		g_usleep(keepalive_interval);
+	}
+	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive stopped\n");
+	return NULL;
+}
+
 /* Plugin implementation */
 int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	if (g_atomic_int_get(&stopping)) {
@@ -315,6 +338,7 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			}
 			JANUS_LOG(LOG_VERB, "Parsing category '%s'\n", cat->name);
 			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
+			janus_source_parse_keepalive_interval(janus_config_item(cat, "keepalive_interval"), &keepalive_interval);
 			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
 			
 			janus_source_parse_video_codec_priority(janus_config_get_item(cat, "video_codec_priority"));
@@ -368,6 +392,14 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 	if (error != NULL) {
 		g_atomic_int_set(&initialized, 0);
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the Source rtsp server thread...\n", error->code, error->message ? error->message : "??");
+		return -1;
+	}
+
+	/* Start the keepalive thread */
+	keepalive = g_thread_try_new("source keepalive", &janus_source_keepalive, NULL, &error);
+	if (error != NULL) {
+		g_atomic_int_set(&initialized, 0);
+		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the SourcePlugin keepalive thread...\n", error->code, error->message ? error->message : "??");
 		return -1;
 	}
 
@@ -1131,6 +1163,20 @@ static void janus_source_parse_ports_range(janus_config_item *ports_range, uint1
 		if (*max_port == 0)
 			*max_port = 65535;
 		JANUS_LOG(LOG_VERB, "UDP port range: %u - %u\n", *min_port, *max_port);
+	}
+}
+
+static void janus_source_parse_keepalive_interval(janus_config_item *config_keepalive_interval, uint64_t *interval)
+{
+	if (config_keepalive_interval && config_keepalive_interval->value)
+	{
+		uint32_t it = atoi(config_keepalive_interval->value);
+		*interval = 1000000 * it; //config interval in sec, must be converted to microseconds
+
+		if (*interval == 0)
+			*interval = keepalive_interval;
+
+		JANUS_LOG(LOG_VERB, "Keepalive interval: %u\n", *interval);
 	}
 }
 
