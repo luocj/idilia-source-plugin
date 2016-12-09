@@ -4,16 +4,14 @@
 #include "audio_video_defines.h"
 #include "node_service_access.h"
 #include "rtsp_server.h"
+#include "rtsp_clients_utils.h"
+#include "socket_names.h"
 
-
-static void client_play_request_cb(GstRTSPClient  *gstrtspclient, GstRTSPContext *rtspcontext, gpointer data);
 static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
-static const gchar * janus_source_get_udpsrc_name(int stream, int type);
-static gchar * janus_source_create_launch_pipe(janus_source_session * session);
-static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
-static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
+static gchar * janus_source_create_launch_pipe(janus_source_session * session, pipeline_callback_data_t * data);
+static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, pipeline_callback_data_t * data);
+static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, pipeline_callback_data_t * data);
 static gchar *janus_source_create_json_request(gchar *request);
-static gboolean new_session = FALSE; 
 
 
 static GstSDPMessage *
@@ -72,214 +70,198 @@ no_sdp:
 	}
 }
 
-static const gchar * janus_source_get_udpsrc_name(int stream, int type) { 
-	switch(stream)
-	{
-		case JANUS_SOURCE_STREAM_VIDEO:
-			switch (type)
-			{
-			case JANUS_SOURCE_SOCKET_RTP_SRV:
-				return "udpsrc_rtp_video";
-			case JANUS_SOURCE_SOCKET_RTCP_RCV_SRV:
-				return "udpsrc_rtcp_rcv_video";
-			default:
-				break;
-			}
-			break ;
-
-		case JANUS_SOURCE_STREAM_AUDIO :
-			switch (type)
-			{
-			case JANUS_SOURCE_SOCKET_RTP_SRV:
-				return "udpsrc_rtp_audio";
-			case JANUS_SOURCE_SOCKET_RTCP_RCV_SRV:
-				return "udpsrc_rtcp_rcv_audio";
-			default:
-				break;
-			}
-			break ;
-		default:
-			break;
-	 }
-	
-	JANUS_LOG(LOG_ERR, "Error, not implemented!");
-	
-	return NULL;
-}
-
-static void rtsp_new_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data) {	
-
-	janus_source_session * session = (janus_source_session *)data;
-		 
-	if (!session) {
-		JANUS_LOG(LOG_ERR, "rtsp_new_state_cb: session is NULL\n");
-		return;
-	}else {
-		JANUS_LOG(LOG_VERB,"rtsp_new_state_cb  %s\n",gst_element_state_get_name((GstState)state));		
-		g_atomic_int_set(&session->rtsp_session_state,state);
-	}
-}
-
-static void rtsp_removed_stream_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data) {
-	JANUS_LOG(LOG_VERB, "***rtsp_removed_stream_cb: %d \n", (GstState)state);
-}
-
-static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, gpointer data)
+int close_and_destroy_sockets(gpointer key, janus_source_socket * sck, gpointer user_data)
 {
-	JANUS_LOG(LOG_VERB, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
+	if (sck) {
+		JANUS_LOG(LOG_VERB, "Closing socket %p\n", sck);
+		socket_utils_close_socket(sck);
+		g_free(sck);
+	}
 
-	janus_source_session * session = (janus_source_session *)data;
+	return TRUE;
+}
+
+void pipeline_callback_data_destroy(pipeline_callback_data_t * data) {
+	g_assert(data);
+	JANUS_LOG(LOG_INFO, "Freeing callback data for session: %s\n", data->id);
+	g_hash_table_foreach_remove(data->sockets, (GHRFunc)close_and_destroy_sockets, NULL);
+	g_hash_table_destroy(data->sockets);
+	g_free(data->id);
+	g_free(data->rtsp_url);
+	g_free(data);
+}
+
+static void set_custom_socket(GHashTable * sockets, GstElement *bin, const gchar * socket_name) {
+	g_assert(sockets);
 	
-	 
-	if (!session) {
-		JANUS_LOG(LOG_ERR, "rtsp_media_target_state_cb: session is NULL\n");
+	janus_source_socket *sck = g_hash_table_lookup(sockets, socket_name);
+	GstElement * udp_src = gst_bin_get_by_name(GST_BIN(bin), socket_name);			
+
+	if (!sck || !udp_src || !sck->socket) {
+		JANUS_LOG(LOG_FATAL, "Invalid input objects: %p, %p\n", sck, udp_src);
+		return;
+	}
+
+	g_assert(G_IS_SOCKET(sck->socket));
+	g_object_set(udp_src, "socket", sck->socket, NULL);
+	g_object_set(udp_src, "close-socket", FALSE, NULL);
+	g_object_unref(udp_src);
+}
+
+
+static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, pipeline_callback_data_t * data)
+{
+	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
+
+	if (!data) {
+		JANUS_LOG(LOG_ERR, "Calback data is null\n");
 		return;
 	}
 	
-	if (state == GST_STATE_PAUSED && session->rtsp_session_state == GST_STATE_PAUSED && new_session == TRUE ) {
-				
-		GstElement * bin = NULL;
-		GSocket * socket = NULL;
-		bin = gst_rtsp_media_get_element(gstrtspmedia);
+	if (state == GST_STATE_PAUSED) {
+		JANUS_LOG(LOG_INFO, "Setting custom sockets\n");		
+		GstElement * bin = gst_rtsp_media_get_element(gstrtspmedia);
 		g_assert(bin);
 		
-		for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
-		{
-			GstElement * udp_src_rtp = gst_bin_get_by_name(GST_BIN(bin), janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV));			
+		set_custom_socket(data->sockets, bin, SOCKET_VIDEO_RTP_SRV);
+		set_custom_socket(data->sockets, bin, SOCKET_VIDEO_RTCP_RCV_SRV);
 
-			g_assert(udp_src_rtp);
-		
-			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTP_SRV].socket;			
-			if(socket) {
-				g_assert(socket);
-				g_object_set(udp_src_rtp, "socket", socket, NULL);
-				g_object_set(udp_src_rtp, "close-socket", FALSE, NULL);
-				g_object_unref(udp_src_rtp);
-			}
-		
-			GstElement * udpsrc_rtcp_receive = gst_bin_get_by_name(GST_BIN(bin), janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV));
-			
-			g_assert(udpsrc_rtcp_receive);
-		
-			socket = session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_RCV_SRV].socket;
-			if(socket) {
-				g_assert(socket);
-				g_object_set(udpsrc_rtcp_receive, "socket", socket, NULL);
-				g_object_set(udpsrc_rtcp_receive, "close-socket", FALSE, NULL);
-				g_object_unref(udpsrc_rtcp_receive);					
-			}			
-		}
+		set_custom_socket(data->sockets, bin, SOCKET_AUDIO_RTP_SRV);
+		set_custom_socket(data->sockets, bin, SOCKET_AUDIO_RTCP_RCV_SRV);
 
 		g_object_unref(bin);
-		 
-	}
-		
+
+		if (data->id_rtsp_media_target_state_cb > 0) {
+			JANUS_LOG(LOG_INFO, "Disconnecting signal rtsp_media_target_state_cb: %lu\n", data->id_rtsp_media_target_state_cb);
+			g_signal_handler_disconnect(gstrtspmedia, data->id_rtsp_media_target_state_cb);
+			data->id_rtsp_media_target_state_cb = 0;
+		}
+	}		
 }
 
-static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data)
+static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_VERB, "media_configure callback\n") ;
-	janus_source_session * session = (janus_source_session *)data;
-		 
-	if (!session) {
-		JANUS_LOG(LOG_ERR, "media_configure_cb: session is NULL\n");
+	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
+	 
+	if (!data) {
+		JANUS_LOG(LOG_ERR, "Calback data is null\n");
 		return;
 	}
-	else {
-		g_atomic_int_set(&session->rtsp_session_state,GST_STATE_PAUSED);
-	}
-	
-	g_signal_connect(media, "target-state", (GCallback)rtsp_media_target_state_cb, data);
-	g_signal_connect(media, "new-state", (GCallback)rtsp_new_state_cb, data);
-	g_signal_connect(media, "removed-stream", (GCallback)rtsp_removed_stream_cb, data);
+
+	data->id_rtsp_media_target_state_cb = g_signal_connect(media, "target-state", (GCallback)rtsp_media_target_state_cb, data);
 }
 
-static void
-client_play_request_cb(GstRTSPClient  *gstrtspclient,
-	GstRTSPContext *rtspcontext,
-	gpointer        data)
-{
-	JANUS_LOG(LOG_VERB, "client_play_request_cb\n");
-}
-
-static void
-client_new_session_cb(GstRTSPClient  *gstrtspclient,
-	GstRTSPContext *rtspcontext,
-	gpointer        data)
-{
-	JANUS_LOG(LOG_VERB, "client_new_session_cb\n");	
-}
 
 static void
 client_pause_request_cb(GstRTSPClient  *gstrtspclient,
 	GstRTSPContext *rtspcontext,
-	gpointer        data)
+	pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_VERB, "client_pause_request_cb\n");	
-	new_session = FALSE;
+	JANUS_LOG(LOG_INFO, "client_pause_request_cb\n");	
+
+	if (!data) {
+		JANUS_LOG(LOG_ERR, "Calback data is NULL\n");
+		return;
+	}
+
+	rtsp_clients_list_remove(&data->clients_list, &data->clients_mutex, g_object_ref(gstrtspclient));
 }
 
 static void
 client_setup_request_cb(GstRTSPClient  *gstrtspclient,
 	GstRTSPContext *rtspcontext,
-	gpointer        data)
+	pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_VERB, "client_setup_request_cb\n");	
+	JANUS_LOG(LOG_INFO, "client_setup_request_cb\n");
+
+	if (!data) {
+		JANUS_LOG(LOG_ERR, "Calback data is NULL\n");
+		return;
+	}
+
+	rtsp_clients_list_add(&data->clients_list, &data->clients_mutex, g_object_ref(gstrtspclient));
 }
 
 
 static void
 client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
-	gpointer       data)
+	pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_VERB, "New client connected\n");	
+	JANUS_LOG(LOG_INFO, "New client connected\n");	
+
+	if (!data) {
+		JANUS_LOG(LOG_ERR, "Calback data is null\n");
+		return;
+	}
+
 	GstRTSPClientClass *klass = GST_RTSP_CLIENT_GET_CLASS(gstrtspclient);
-	klass->create_sdp = create_sdp;
-	new_session = TRUE;		
-	g_signal_connect(gstrtspclient, "play-request", (GCallback)client_play_request_cb, data);
-	g_signal_connect(gstrtspclient, "new-session",(GCallback)client_new_session_cb, data);
+	klass->create_sdp = create_sdp;	
 	g_signal_connect(gstrtspclient, "pause-request",(GCallback)client_pause_request_cb, data);
-	g_signal_connect(gstrtspclient, "setup-request",(GCallback)client_setup_request_cb, data);
+	g_signal_connect(gstrtspclient, "setup-request",(GCallback)client_setup_request_cb, data);	
 }
 
-
-static gchar * janus_source_create_launch_pipe(janus_source_session * session) {
+static gchar * janus_source_create_launch_pipe(janus_source_session * session, pipeline_callback_data_t * data) {
 	gchar * launch_pipe = NULL;
 	gchar * launch_pipe_video = NULL;
 	gchar * launch_pipe_audio = NULL;
+
+	g_assert(session);
 	
 	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
 	{
+		int port = 0;
+		janus_source_socket * sck = NULL;
+		const gchar *socket_rtp_srv_name, *socket_rtcp_rcv_srv_name, *socket_rtcp_snd_srv_name;
+
+		if (stream == JANUS_SOURCE_STREAM_VIDEO) {
+			socket_rtcp_snd_srv_name = SOCKET_VIDEO_RTCP_SND_SRV;
+			socket_rtp_srv_name = SOCKET_VIDEO_RTP_SRV;
+		    socket_rtcp_rcv_srv_name = SOCKET_VIDEO_RTCP_RCV_SRV;
+		} else {
+			socket_rtcp_snd_srv_name = SOCKET_AUDIO_RTCP_SND_SRV;
+			socket_rtp_srv_name = SOCKET_AUDIO_RTP_SRV;
+		    socket_rtcp_rcv_srv_name = SOCKET_AUDIO_RTCP_RCV_SRV;
+		}
+
+		sck = g_hash_table_lookup(session->sockets, socket_rtcp_snd_srv_name);
+
+		if (sck) {
+			port = sck->port;
+		} else {
+			JANUS_LOG(LOG_ERR, "Unable to lookup for %s\n", socket_rtcp_snd_srv_name);
+			return NULL;
+		}
+
 		switch (session->codec[stream])
 		{
 		case IDILIA_CODEC_VP8:
 			launch_pipe_video = g_strdup_printf(PIPE_VIDEO_VP8,
 				session->codec_pt[stream],
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV),
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV),
-				session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_SND_SRV].port);
+				socket_rtp_srv_name,
+				socket_rtcp_rcv_srv_name,
+				port);
 			break;
 		case IDILIA_CODEC_VP9:
 			launch_pipe_video = g_strdup_printf(PIPE_VIDEO_VP9,
 				session->codec_pt[stream],
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV),
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV),
-				session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_SND_SRV].port);
+				socket_rtp_srv_name,
+				socket_rtcp_rcv_srv_name,
+				port);
 			break;
 		case IDILIA_CODEC_H264:
 			launch_pipe_video = g_strdup_printf(PIPE_VIDEO_H264,
 				session->codec_pt[stream],
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV),
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV),
-				session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_SND_SRV].port);
+				socket_rtp_srv_name,
+				socket_rtcp_rcv_srv_name,
+				port);
 			break;
 		case IDILIA_CODEC_OPUS:
 			launch_pipe_audio = g_strdup_printf(PIPE_AUDIO_OPUS,
 				session->codec_pt[stream],
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTP_SRV),
-				janus_source_get_udpsrc_name(stream, JANUS_SOURCE_SOCKET_RTCP_RCV_SRV),
-				session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_SND_SRV].port);
+				socket_rtp_srv_name,
+				socket_rtcp_rcv_srv_name,
+				port);
 			break;
 		default: 
 			break;
@@ -307,6 +289,25 @@ static gchar * janus_source_create_launch_pipe(janus_source_session * session) {
 	return launch_pipe;
 }
 
+static void create_server_socket(GHashTable * sockets, const gchar *name) {
+	g_hash_table_insert(
+			sockets, 
+			(gpointer)name, 
+			socket_utils_create_server_socket()
+			);
+}
+
+static void create_client_socket(GHashTable * cli_sockets, const gchar *name, GHashTable * srv_sockets, const gchar *srv_name) {
+	g_hash_table_insert(
+		cli_sockets, 
+		(gpointer)name, 
+		socket_utils_create_client_socket(
+			((janus_source_socket*)g_hash_table_lookup(
+				srv_sockets, 
+				(gpointer)srv_name))->port)
+		);
+}
+
 void janus_rtsp_handle_client_callback(gpointer data) {	
 	
 	janus_source_session *session = (janus_source_session*)(data); 
@@ -317,44 +318,69 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	}
 
 	if (g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_INFO, "Session is being destroyed\n");		 
-	}
-
-	for (int i = 0; i < JANUS_SOURCE_STREAM_MAX; i++)
-	{
-		for (int j = 0; j < JANUS_SOURCE_SOCKET_MAX; j++)
-			JANUS_LOG(LOG_VERB, "UDP port[%d][%d]: %d\n", i, j, session->socket[i][j].port);
+		JANUS_LOG(LOG_INFO, "Session is being destroyed\n");	
+		return;	 
 	}
 
 	const gchar * rtsp_ip = janus_source_get_rtsp_ip();
+	int rtsp_port = janus_source_rtsp_server_port(rtsp_server_data);
+	pipeline_callback_data_t * callback_data = g_new0(pipeline_callback_data_t, 1);
 
-	GstRTSPMediaFactory *factory;	
-	gchar * launch_pipe = janus_source_create_launch_pipe(session);
-	factory = janus_source_rtsp_factory(rtsp_server_data, rtsp_ip, launch_pipe);
+	session->callback_data = callback_data;
+	session->rtsp_url = g_strdup_printf("rtsp://%s:%d/%s", rtsp_ip, rtsp_port, session->id);
+
+	callback_data->id = g_strdup(session->id);
+	callback_data->rtsp_url = g_strdup(session->rtsp_url);
+
+	rtsp_clients_list_init(&callback_data->clients_list, &callback_data->clients_mutex);
+
+	session->sockets = g_hash_table_new(g_str_hash, g_str_equal);
+	callback_data->sockets = g_hash_table_new(g_str_hash, g_str_equal); 
+
+	create_server_socket(callback_data->sockets, SOCKET_VIDEO_RTP_SRV);
+	create_client_socket(session->sockets, SOCKET_VIDEO_RTP_CLI, callback_data->sockets, SOCKET_VIDEO_RTP_SRV);
+	create_server_socket(callback_data->sockets, SOCKET_VIDEO_RTCP_RCV_SRV);
+	create_client_socket(session->sockets, SOCKET_VIDEO_RTCP_RCV_CLI, callback_data->sockets, SOCKET_VIDEO_RTCP_RCV_SRV);
+	create_server_socket(session->sockets, SOCKET_VIDEO_RTCP_SND_SRV);
+
+	create_server_socket(callback_data->sockets, SOCKET_AUDIO_RTP_SRV);
+	create_client_socket(session->sockets, SOCKET_AUDIO_RTP_CLI, callback_data->sockets, SOCKET_AUDIO_RTP_SRV);
+	create_server_socket(callback_data->sockets, SOCKET_AUDIO_RTCP_RCV_SRV);
+	create_client_socket(session->sockets, SOCKET_AUDIO_RTCP_RCV_CLI, callback_data->sockets, SOCKET_AUDIO_RTCP_RCV_SRV);
+	create_server_socket(session->sockets, SOCKET_AUDIO_RTCP_SND_SRV);
+
+	gchar * launch_pipe = janus_source_create_launch_pipe(session, data);
+
+	GstRTSPMediaFactory * factory = janus_source_rtsp_factory(rtsp_server_data, rtsp_ip, launch_pipe);
 	g_free(launch_pipe);
 
 	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
 	{
-		session->rtcp_cbk_data[stream].session = (gpointer)session;
-		session->rtcp_cbk_data[stream].is_video = (stream == JANUS_SOURCE_STREAM_VIDEO);
+		callback_data->rtcp_cbk_data[stream].session = (gpointer)session;
+		callback_data->rtcp_cbk_data[stream].is_video = (stream == JANUS_SOURCE_STREAM_VIDEO);
 
-		socket_utils_attach_callback(&session->socket[stream][JANUS_SOURCE_SOCKET_RTCP_SND_SRV],
-			(GSourceFunc)janus_source_send_rtcp_src_received,
-			(gpointer)&session->rtcp_cbk_data[stream]);
+		janus_source_socket * sck = NULL;
+
+		if (stream == JANUS_SOURCE_STREAM_VIDEO) {
+			sck = g_hash_table_lookup(session->sockets, SOCKET_VIDEO_RTCP_SND_SRV);
+		} else {
+			sck = g_hash_table_lookup(session->sockets, SOCKET_AUDIO_RTCP_SND_SRV);
+		}
+
+		if (sck) {
+			socket_utils_attach_callback(sck, 
+				(GSourceFunc)janus_source_send_rtcp_src_received,
+				(gpointer)&callback_data->rtcp_cbk_data[stream]);
+			} else {
+				JANUS_LOG(LOG_ERR, "Socket rtcp_snd_srv lookup error");
+			}
 	}
 
-	int rtsp_port = 0;
-	gchar * uri = g_strdup_printf("/%s",session->id);
-	rtsp_port = janus_source_rtsp_server_port(rtsp_server_data);
-
-	session->rtsp_url = g_strdup_printf("rtsp://%s:%d%s", rtsp_ip, rtsp_port, uri);
-	
+#ifdef USE_REGISTRY_SERVICE
 	gchar *http_request_data = janus_source_create_json_request(session->rtsp_url);
-	const gchar *HTTP_POST = "POST";
 	json_t *db_id_json_object = NULL;
 
-	gboolean retCode = curl_request(session->curl_handle, session->status_service_url, http_request_data, HTTP_POST, &db_id_json_object);
-	if (retCode != TRUE) {
+	if (curl_request(session->curl_handle, session->status_service_url, http_request_data, "POST", &db_id_json_object) != TRUE) {
 		JANUS_LOG(LOG_ERR, "Could not send the request to the server\n");		
 	}
 	else {
@@ -363,42 +389,39 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 		}	
 		else
 		{			
-			const gchar *DUPLICATE_FIELD_ERR_CODE = "11000";
-			const gchar *DB_ERROR_CODE_FIELD = "code";
+			gint code_err = json_integer_value(json_object_get(db_id_json_object, "code"));
 
-			gint code_err = json_integer_value(json_object_get(db_id_json_object,DB_ERROR_CODE_FIELD));
-
-			if(code_err != 0){
-            	gchar *code_error_string = g_strdup_printf("%d",code_err);
-				if(0 == g_strcmp0(DUPLICATE_FIELD_ERR_CODE,code_error_string)){
-					JANUS_LOG(LOG_ERR, "The mountpoint %s already exist in the system\n",uri);
+			if (code_err != 0) {
+            	gchar *code_error_string = g_strdup_printf("%d", code_err);
+				if(0 == g_strcmp0("11000", code_error_string)){
+					JANUS_LOG(LOG_ERR, "The mountpoint /%s already exist in the system\n", session->id);
 					janus_source_hangup_media(session->handle);		
 					janus_source_send_id_error(session->handle);							
 				} 
 				g_free(code_error_string);
 			}
 			else {
-				const gchar *MEDIA_CONFIGURE_CB = "media-configure";
-				const gchar *CLIENT_CONNECTED_CB = "client-connected";
-				const gchar *DB_FIELD_ID = "_id";	
-
-				g_signal_connect(factory, MEDIA_CONFIGURE_CB, (GCallback)media_configure_cb, (gpointer)session);
-
-				g_signal_connect(rtsp_server_data->rtsp_server, CLIENT_CONNECTED_CB, (GCallback)client_connected_cb, (gpointer)session);
+				callback_data->id_media_configure_cb = g_signal_connect(factory, "media-configure", (GCallback)media_configure_cb, (gpointer)callback_data);
+				callback_data->id_client_connected_cb = g_signal_connect(rtsp_server_data->rtsp_server, "client-connected", (GCallback)client_connected_cb, (gpointer)callback_data);
 					
-				janus_source_rtsp_mountpoint(rtsp_server_data, factory, uri);
+				janus_source_rtsp_add_mountpoint(rtsp_server_data, factory, session->id);
 				
-				session->db_entry_session_id = (gchar *) g_strdup(json_string_value(json_object_get(db_id_json_object,DB_FIELD_ID)));
+				session->db_entry_session_id = (gchar *) g_strdup(json_string_value(json_object_get(db_id_json_object, "_id")));
 				JANUS_LOG(LOG_INFO, "Stream ready at %s\n", session->rtsp_url);
 			}
 		}
 		json_decref(db_id_json_object);
 	}
-
 	g_free(http_request_data);
-	g_free(uri);
-}
 
+#else
+	callback_data->id_media_configure_cb = g_signal_connect(factory, "media-configure", (GCallback)media_configure_cb, (gpointer)callback_data);
+	callback_data->id_client_connected_cb = g_signal_connect(rtsp_server_data->rtsp_server, "client-connected", (GCallback)client_connected_cb, (gpointer)callback_data);
+	janus_source_rtsp_add_mountpoint(rtsp_server_data, factory, session->id);	
+	session->db_entry_session_id = NULL;
+	JANUS_LOG(LOG_INFO, "Stream ready at %s\n", session->rtsp_url);
+#endif
+}
 
 gchar *janus_source_create_json_request(gchar *request)
 {
