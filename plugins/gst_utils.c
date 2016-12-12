@@ -12,7 +12,7 @@ static const gchar * janus_source_get_udpsrc_name(int stream, int type);
 static gchar * janus_source_create_launch_pipe(janus_source_session * session);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, gpointer data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, gpointer data);
-static gchar *janus_source_create_json_request(gchar *request);
+static gchar *janus_source_create_json_request(gchar *request, const gchar *pid);
 static gboolean new_session = FALSE; 
 
 
@@ -349,11 +349,12 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 
 	session->rtsp_url = g_strdup_printf("rtsp://%s:%d%s", rtsp_ip, rtsp_port, uri);
 	
-	gchar *http_request_data = janus_source_create_json_request(session->rtsp_url);
+	gchar *http_request_data = janus_source_create_json_request(session->rtsp_url, session->pid);
 	const gchar *HTTP_POST = "POST";
 	json_t *db_id_json_object = NULL;
 
 	gboolean retCode = curl_request(session->curl_handle, session->status_service_url, http_request_data, HTTP_POST, &db_id_json_object);
+		
 	if (retCode != TRUE) {
 		JANUS_LOG(LOG_ERR, "Could not send the request to the server\n");		
 	}
@@ -400,12 +401,13 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 }
 
 
-gchar *janus_source_create_json_request(gchar *request)
+gchar *janus_source_create_json_request(gchar *request, const gchar *pid)
 {
 	json_t *object = json_object();
 	const gchar *URI = "uri";
 	const gchar *REGEX_PATTERN = "\\/";
 	const gchar *ID_JSON_FIELD = "id";
+	const gchar *PID_JSON_FIELD = "pid";
 
     json_object_set_new(object, URI, json_string(request)); 
 
@@ -416,6 +418,9 @@ gchar *janus_source_create_json_request(gchar *request)
 		json_object_set_new(object, ID_JSON_FIELD, json_string(result[g_strv_length(result)-1]));
 		g_strfreev (result);
     }
+
+	if(pid)
+		json_object_set_new(object, PID_JSON_FIELD, json_string(pid));
 
     gchar *request_str = json_dumps(object, JSON_PRESERVE_ORDER);
 	 

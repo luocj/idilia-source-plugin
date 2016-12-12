@@ -6,6 +6,7 @@ keepalive_interval = 5
 
 [status-service]
 status_service_url = http://localhost:4000/api/cams
+keepalive_service_url = http://localhost:4000/api/keepalive
 
 [rtsp-inteface-ip]
 interface =  localhost ; obligatory field! set for rtsp server 

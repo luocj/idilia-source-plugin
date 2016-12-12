@@ -114,6 +114,8 @@
 #define JANUS_SOURCE_AUTHOR			    "Motorola Solutions Inc."
 #define JANUS_SOURCE_PACKAGE			"idilia.plugin.source"
 
+#define JANUS_PID_SIZE 12
+
 /* Plugin methods */
 janus_plugin *create(void);
 int janus_source_init(janus_callbacks *callback, const char *config_path);
@@ -180,7 +182,8 @@ static GThread *handler_rtsp_thread;
 static GThread *keepalive;
 static void *janus_source_handler(void *data);
 
-
+/* Unique plugin ID */
+static char PID[JANUS_PID_SIZE];
 
 typedef struct janus_source_message {
 	janus_plugin_session *handle;
@@ -203,6 +206,7 @@ static const char * gst_debug_str = "*:3"; //gst debug setting
 static uint16_t udp_min_port = 0, udp_max_port = 0;
 static uint64_t keepalive_interval = 5000000; //5sec keepalive default interval
 static gchar *status_service_url = NULL;
+static gchar *keepalive_service_url = NULL;
 static gboolean use_codec_priority = FALSE;
 static idilia_codec codec_priority_list[] = { IDILIA_CODEC_INVALID, IDILIA_CODEC_INVALID };
 static gchar *rtsp_interface_ip = NULL;
@@ -287,22 +291,59 @@ void *janus_source_watchdog(void *data) {
 	return NULL;
 }
 
-/* SourcePlugin keepalive (sort of) */
+/* SourcePlugin keepalive */
+int janus_set_pid(void);
+int janus_set_pid(void){
+	for(guint32 i = 0; i < JANUS_PID_SIZE; i++)
+		if(PID[i]) return 0;
+
+	guint32 rand = g_random_int();
+	return snprintf(PID, JANUS_PID_SIZE, "%u", rand);
+}
+
 void *janus_source_keepalive(void *data);
 void *janus_source_keepalive(void *data) {
 	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive started\n");
-	gint64 now = 0;
+
+	gchar *body_str = g_strdup_printf("{\"pid\": \"%s\", \"dly\": \"%lu\"}", PID, (uint64_t)(keepalive_interval/1000000));
+	json_t *res_json_object = NULL;	
+
 	while (g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
 		janus_mutex_lock(&keepalive_mutex);
-		/* Iterate on all the sessions */
-		now = janus_get_monotonic_time();
 		
+		gboolean retCode = curl_request(curl_handle, keepalive_service_url, body_str, "POST", &res_json_object);		    		
+		if (retCode != TRUE) {
+			JANUS_LOG(LOG_ERR, "Could not send the request to the server.\n"); 
+		}else{
+			if (json_is_object(res_json_object)) json_decref(res_json_object); 				
+			else JANUS_LOG(LOG_ERR, "Not valid json object.\n");
 		}
+
 		janus_mutex_unlock(&keepalive_mutex);
-		g_usleep(keepalive_interval);
+		g_usleep(keepalive_interval);						
 	}
+
+	if (body_str) {
+		g_free(body_str);
+	}
+
 	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive stopped\n");
 	return NULL;
+}
+
+void janus_source_remove_pid_from_registry(void);
+void janus_source_remove_pid_from_registry(void){
+
+	gchar *curl_str = g_strdup_printf("%s/%s", keepalive_service_url, PID);	
+	gboolean retCode = curl_request(curl_handle, keepalive_service_url, "{}", "DELETE", NULL);		    	
+
+	if (curl_str) {
+		g_free(curl_str);
+	}
+
+	if (retCode != TRUE) {
+	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
+	}
 }
 
 /* Plugin implementation */
@@ -338,7 +379,8 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 			}
 			JANUS_LOG(LOG_VERB, "Parsing category '%s'\n", cat->name);
 			janus_source_parse_ports_range(janus_config_get_item(cat, "udp_port_range"), &udp_min_port, &udp_max_port);
-			janus_source_parse_keepalive_interval(janus_config_item(cat, "keepalive_interval"), &keepalive_interval);
+			janus_source_parse_keepalive_interval(janus_config_get_item(cat, "keepalive_interval"), &keepalive_interval);
+			janus_source_parse_status_service_url(janus_config_get_item(cat, "keepalive_service_url"), &keepalive_service_url);
 			janus_source_parse_status_service_url(janus_config_get_item(cat,"status_service_url"),&status_service_url);
 			
 			janus_source_parse_video_codec_priority(janus_config_get_item(cat, "video_codec_priority"));
@@ -395,7 +437,15 @@ int janus_source_init(janus_callbacks *callback, const char *config_path) {
 		return -1;
 	}
 
-	/* Start the keepalive thread */
+	/* Set PID */
+	memset(&PID, 0, JANUS_PID_SIZE);	
+	if (0 > janus_set_pid()) {
+		g_atomic_int_set(&initialized, 0);
+		JANUS_LOG(LOG_ERR, "Got an error while plugin id initialize.");
+		return -1;
+	}
+
+	/*Start the keepalive thread */
 	keepalive = g_thread_try_new("source keepalive", &janus_source_keepalive, NULL, &error);
 	if (error != NULL) {
 		g_atomic_int_set(&initialized, 0);
@@ -433,6 +483,15 @@ void janus_source_destroy(void) {
 		g_free(rtsp_server_data);
 	}
 
+	if (keepalive != NULL) {
+		g_thread_join(keepalive);
+		keepalive = NULL;
+	}
+
+	if(keepalive == NULL){
+		janus_source_remove_pid_from_registry();
+	}
+
 	if (watchdog != NULL) {
 		g_thread_join(watchdog);
 		watchdog = NULL;
@@ -453,6 +512,11 @@ void janus_source_destroy(void) {
     if (status_service_url) {
         g_free(status_service_url);
 		status_service_url = NULL;
+    }
+
+    if (keepalive_service_url) {
+        g_free(keepalive_service_url);
+		keepalive_service_url = NULL;
     }
 
 	 if (rtsp_interface_ip) {
@@ -511,6 +575,8 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 	session->db_entry_session_id = NULL;
 	session->id = NULL;
 	session->status_service_url=status_service_url;
+	session->keepalive_service_url=keepalive_service_url;
+	session->pid=PID;
 	session->curl_handle=curl_handle;
 
 	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
@@ -1176,7 +1242,7 @@ static void janus_source_parse_keepalive_interval(janus_config_item *config_keep
 		if (*interval == 0)
 			*interval = keepalive_interval;
 
-		JANUS_LOG(LOG_VERB, "Keepalive interval: %u\n", *interval);
+		JANUS_LOG(LOG_VERB, "Keepalive interval: %lu\n", *interval);
 	}
 }
 

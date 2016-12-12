@@ -44,6 +44,8 @@ typedef struct janus_source_session {
 	gchar * id; /* stream id */
 	CURL *curl_handle;	
 	gchar *status_service_url;
+	gchar *keepalive_service_url;
+	const gchar *pid; 
 	GstState rtsp_session_state;
 	janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX];
 	janus_source_rtcp_cbk_data rtcp_cbk_data[JANUS_SOURCE_STREAM_MAX];
