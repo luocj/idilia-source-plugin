@@ -106,6 +106,7 @@
 #include "audio_video_defines.h"
 #include "rtsp_server.h"
 #include "gst_utils.h"
+
 /* Plugin information */
 #define JANUS_SOURCE_VERSION			1
 #define JANUS_SOURCE_VERSION_STRING	    "0.0.1"
@@ -225,7 +226,7 @@ static void janus_source_parse_rtsp_interface_ip(janus_config_item *config, gcha
 gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condition, janus_source_rtcp_cbk_data * data);
 static gchar * janus_source_do_codec_negotiation(janus_source_session * session, gchar * orig_sdp);
 static idilia_codec janus_source_select_video_codec_by_priority_list(const gchar * sdp);
-static gboolean janus_source_create_sockets(janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX]);
+
 
 static void janus_source_message_free(janus_source_message *msg) {
 	if(!msg || msg == &exit_message)
@@ -469,6 +470,8 @@ void janus_source_destroy(void) {
 		handler_thread = NULL;
 	}
 
+	g_hash_table_foreach(sessions, janus_source_close_session_func, NULL);
+	socket_utils_destroy();
 
 	janus_source_deattach_rtsp_queue_callback(rtsp_server_data);
 	
@@ -478,10 +481,9 @@ void janus_source_destroy(void) {
 		g_thread_join(handler_rtsp_thread);
 		handler_rtsp_thread = NULL;
 	}
-
-	if(rtsp_server_data != NULL) {
-		g_free(rtsp_server_data);
-	}
+  
+	g_free(rtsp_server_data);
+	rtsp_server_data = NULL;
 
 	if (keepalive != NULL) {
 		g_thread_join(keepalive);
@@ -497,9 +499,6 @@ void janus_source_destroy(void) {
 		watchdog = NULL;
 	}
 
-	g_hash_table_foreach(sessions, janus_source_close_session_func, NULL);
-	socket_utils_destroy();
-	
 	/* FIXME We should destroy the sessions cleanly */
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_destroy(sessions);
@@ -509,21 +508,17 @@ void janus_source_destroy(void) {
 	sessions = NULL;
 	
     /* Free configuration fields */
-    if (status_service_url) {
-        g_free(status_service_url);
-		status_service_url = NULL;
-    }
-
-    if (keepalive_service_url) {
-        g_free(keepalive_service_url);
-		keepalive_service_url = NULL;
-    }
-
-	 if (rtsp_interface_ip) {
-        g_free(rtsp_interface_ip);
-		rtsp_interface_ip = NULL;
-    }
-
+  if (keepalive_service_url) {
+    g_free(keepalive_service_url);
+    keepalive_service_url = NULL;
+  }
+  
+	g_free(status_service_url);
+	status_service_url = NULL;
+ 
+	g_free(rtsp_interface_ip);
+	rtsp_interface_ip = NULL;
+ 
 	curl_cleanup(curl_handle);
 	
 	g_atomic_int_set(&initialized, 0);
@@ -585,18 +580,10 @@ void janus_source_create_session(janus_plugin_session *handle, int *error) {
 		session->codec_pt[stream] = -1;
 	}
 
-	g_atomic_int_set(&session->rtsp_session_state,GST_STATE_NULL);
 	session->bitrate = 0;	/* No limit */
 	session->destroyed = 0;
 	g_atomic_int_set(&session->hangingup, 0);
 	handle->plugin_handle = session;
-
-	memset(session->socket, 0, sizeof(session->socket));
-	if (!janus_source_create_sockets(session->socket))
-	{
-		JANUS_LOG(LOG_FATAL, "Unable to create one or more sockets!\n");
-		*error = -3;
-	}
 
 	janus_mutex_lock(&sessions_mutex);
 	g_hash_table_insert(sessions, handle, session);
@@ -1043,65 +1030,33 @@ static void *janus_source_handler(void *data) {
 }
 
 void janus_source_relay_rtp(janus_source_session *session, int video, char *buf, int len) {
-	GSocket * sock_rtp_cli = video ? session->socket[JANUS_SOURCE_STREAM_VIDEO][JANUS_SOURCE_SOCKET_RTP_CLI].socket :  session->socket[JANUS_SOURCE_STREAM_AUDIO][JANUS_SOURCE_SOCKET_RTP_CLI].socket;
 
-	if (!sock_rtp_cli)
-		return;
+	janus_source_socket * sck = (video ? g_hash_table_lookup(session->sockets, "video_rtp_cli") : g_hash_table_lookup(session->sockets, "audio_rtp_cli"));
 
-	if (g_socket_send(sock_rtp_cli, buf, len, NULL, NULL) < 0) {
+	if (!sck) {
+		JANUS_LOG(LOG_ERR, "Unable to lookup for rtp_cli\n");
+		return; 
+	} 
+
+	if (g_socket_send(sck->socket, buf, len, NULL, NULL) < 0) {
 		//JANUS_LOG(LOG_ERR, "Send RTP failed! type: %s\n", video ? "video" : "audio");
 	}
-	else {
-		//JANUS_LOG(LOG_ERR, "Send RTP successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
-	}
-
 }
 
 static void janus_source_relay_rtcp(janus_source_session *session, int video, char *buf, int len) {
 
-	GSocket * sock_rtcp_cli = video ? session->socket[JANUS_SOURCE_STREAM_VIDEO][JANUS_SOURCE_SOCKET_RTCP_RCV_CLI].socket :  session->socket[JANUS_SOURCE_STREAM_AUDIO][JANUS_SOURCE_SOCKET_RTCP_RCV_CLI].socket;
+	janus_source_socket * sck = (video ? g_hash_table_lookup(session->sockets, "video_rtcp_rcv_cli") : g_hash_table_lookup(session->sockets, "audio_rtcp_rcv_cli"));
 
-	if (!sock_rtcp_cli)
-		return;
+	if (!sck) {
+		JANUS_LOG(LOG_ERR, "Unable to lookup for rtcp_rcv_cli\n");	
+		return; 
+	} 
 
-	if (g_socket_send(sock_rtcp_cli, buf, len, NULL, NULL) < 0) {
+	if (g_socket_send(sck->socket, buf, len, NULL, NULL) < 0) {
 		//JANUS_LOG(LOG_ERR, "Send RTCP failed! type: %s\n", video ? "video" : "audio");
 	}
-	else {
-		//JANUS_LOG(LOG_ERR, "Send RTCP successfully! type: %s; len=%d\n", video ? "video" : "audio", len);
-	}
+
 }
-
-static gboolean janus_source_create_sockets(janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX]) {
-	
-	gboolean result = TRUE;
-
-	for (int i = 0; i < JANUS_SOURCE_STREAM_MAX; i++)
-	{
-		if (!socket_utils_create_server_socket(&socket[i][JANUS_SOURCE_SOCKET_RTP_SRV])) {
-			result = FALSE;
-		}
-
-		if (!socket_utils_create_client_socket(&socket[i][JANUS_SOURCE_SOCKET_RTP_CLI], socket[i][JANUS_SOURCE_SOCKET_RTP_SRV].port)) {
-			result = FALSE;
-		}
-	
-		if (!socket_utils_create_server_socket(&socket[i][JANUS_SOURCE_SOCKET_RTCP_RCV_SRV])) {
-			result = FALSE;
-		}
-
-		if (!socket_utils_create_client_socket(&socket[i][JANUS_SOURCE_SOCKET_RTCP_RCV_CLI], socket[i][JANUS_SOURCE_SOCKET_RTCP_RCV_SRV].port)) {
-			result = FALSE;
-		}
-	
-		if (!socket_utils_create_server_socket(&socket[i][JANUS_SOURCE_SOCKET_RTCP_SND_SRV])) {
-			result = FALSE;
-		}
-	}
-	
-	return result;
-}
-
 
 static void *janus_source_rtsp_server_thread(void *data) {
 
@@ -1164,45 +1119,39 @@ static void janus_source_close_session_func(gpointer key, gpointer value, gpoint
 }
 
 static void janus_source_close_session(janus_source_session * session) {
-	JANUS_LOG(LOG_INFO, "Closing source session\n");
+	JANUS_LOG(LOG_INFO, "Closing source session: %s\n", session->id);
 
 	gchar *session_id = g_strdup(session->db_entry_session_id);
 	gchar *curl_str = g_strdup_printf("%s/%s", status_service_url, session_id);	
 
-	gboolean retCode = curl_request(curl_handle, curl_str, "{}", "DELETE", NULL);		    
-	
-	g_atomic_int_set(&session->rtsp_session_state,GST_STATE_PAUSED);
+#ifdef USE_REGISTRY_SERVICE
+	curl_request(curl_handle, curl_str, "{}", "DELETE", NULL);		    
+#endif	    
 
-	if (retCode != TRUE) {
-	    JANUS_LOG(LOG_ERR, "Could not send the request to the server\n"); 
-	}
-			
-	if (session_id) {
-		g_free(session_id);
-	}
-	
-	if (curl_str) {
-		g_free(curl_str);
+	janus_source_rtsp_remove_mountpoint(rtsp_server_data, session->id, session->callback_data);
+
+	if (session->sockets) {
+		JANUS_LOG(LOG_VERB, "Closing session sockets\n");
+		g_hash_table_foreach_remove(session->sockets, (GHRFunc)close_and_destroy_sockets, NULL);
+		g_hash_table_destroy(session->sockets);
+		session->sockets = NULL;
 	}
 
-	for (int stream = 0; stream < JANUS_SOURCE_STREAM_MAX; stream++)
-	{
-		for (int j = 0; j < JANUS_SOURCE_SOCKET_MAX; j++)
-		{
-			socket_utils_close_socket(&session->socket[stream][j]);
-		}
-	}
+	g_free(session_id);
+	session_id = NULL;
 
+	g_free(curl_str);
+	curl_str = NULL;
 
-	if (session->db_entry_session_id != NULL) {
-		g_free(session->db_entry_session_id);
-	    session->db_entry_session_id = NULL;
-	}
-	
-	if (session->rtsp_url != NULL) {
-		g_free(session->rtsp_url);
-		session->rtsp_url = NULL;
-	}
+	g_free(session->id);
+	session->id = NULL;
+
+	g_free(session->db_entry_session_id);
+	session->db_entry_session_id = NULL;
+
+	g_free(session->rtsp_url);
+	session->rtsp_url = NULL;
+
 }
 
 static void janus_source_parse_ports_range(janus_config_item *ports_range, uint16_t *min_port, uint16_t * max_port)

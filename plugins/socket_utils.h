@@ -12,8 +12,8 @@ typedef struct janus_source_socket {
 
 void socket_utils_init(uint16_t udp_min_port, uint16_t udp_max_port);
 void socket_utils_destroy(void);
-gboolean socket_utils_create_client_socket(janus_source_socket * sck, int port_to_connect);
-gboolean socket_utils_create_server_socket(janus_source_socket * sck);
+janus_source_socket * socket_utils_create_client_socket(int port_to_connect);
+janus_source_socket * socket_utils_create_server_socket(void);
 void socket_utils_close_socket(janus_source_socket * sck);
 void socket_utils_attach_callback(janus_source_socket * sck, GSourceFunc func, gpointer * user_data);
 void socket_utils_deattach_callback(janus_source_socket * sck);

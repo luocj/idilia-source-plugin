@@ -7,7 +7,7 @@
 static janus_mutex ports_pool_mutex;
 static ports_pool * pp;
 
-static gboolean socket_utils_create_socket(janus_source_socket * sck, gboolean is_client, int req_port);
+static janus_source_socket * socket_utils_create_socket(gboolean is_client, int req_port);
 
 void socket_utils_init(uint16_t udp_min_port, uint16_t udp_max_port)
 {
@@ -22,23 +22,24 @@ void socket_utils_destroy(void)
 	janus_mutex_unlock(&ports_pool_mutex);
 }
 
-gboolean socket_utils_create_client_socket(janus_source_socket * sck, int port_to_connect) {
-	return socket_utils_create_socket(sck, TRUE, port_to_connect);
+janus_source_socket * socket_utils_create_client_socket(int port_to_connect) {
+	return socket_utils_create_socket(TRUE, port_to_connect);
 }
 
-gboolean socket_utils_create_server_socket(janus_source_socket * sck) {
-	return socket_utils_create_socket(sck, FALSE, 0);
+janus_source_socket * socket_utils_create_server_socket(void) {
+	return socket_utils_create_socket(FALSE, 0);
 }
 
-static gboolean socket_utils_create_socket(janus_source_socket * sck, gboolean is_client, int req_port) {
+static janus_source_socket * socket_utils_create_socket(gboolean is_client, int req_port) {
 
+	janus_source_socket * sck = NULL;
 	GSocketAddress * address = NULL;
 	gboolean result = TRUE;
 	GError *error = NULL;
 	int port;
-	
-	sck->source = NULL;
 
+	sck = g_new0(janus_source_socket, 1);
+	
 	sck->socket = g_socket_new(G_SOCKET_FAMILY_IPV4,
 		G_SOCKET_TYPE_DATAGRAM,
 		G_SOCKET_PROTOCOL_UDP,
@@ -100,6 +101,8 @@ static gboolean socket_utils_create_socket(janus_source_socket * sck, gboolean i
 
 	if (!result) {
 		socket_utils_close_socket(sck);
+		g_free(sck);
+		sck = NULL;
 	}
 	else {
 		sck->port = port;
@@ -107,7 +110,7 @@ static gboolean socket_utils_create_socket(janus_source_socket * sck, gboolean i
 	}
 
 	g_clear_object(&address);
-	return result;
+	return sck;
 }
 
 

@@ -5,31 +5,9 @@
 #include "sdp_utils.h"
 #include "plugin.h"
 #include "rtsp_server.h"
+#include "pipeline_callback_data.h"
 
-
-
-enum
-{
-	JANUS_SOURCE_STREAM_VIDEO = 0,
-	JANUS_SOURCE_STREAM_AUDIO,
-	JANUS_SOURCE_STREAM_MAX
-};
-
-enum
-{
-	JANUS_SOURCE_SOCKET_RTP_SRV = 0,
-	JANUS_SOURCE_SOCKET_RTP_CLI,
-	JANUS_SOURCE_SOCKET_RTCP_RCV_SRV,
-	JANUS_SOURCE_SOCKET_RTCP_RCV_CLI,
-	JANUS_SOURCE_SOCKET_RTCP_SND_SRV,
-	JANUS_SOURCE_SOCKET_MAX
-};
-  
-typedef struct rtcp_callback_data
-{
-	gpointer * session;
-	gboolean is_video;
-} janus_source_rtcp_cbk_data;
+#define USE_REGISTRY_SERVICE
 
 typedef struct janus_source_session {
 	janus_plugin_session *handle;
@@ -46,11 +24,10 @@ typedef struct janus_source_session {
 	gchar *status_service_url;
 	gchar *keepalive_service_url;
 	const gchar *pid; 
-	GstState rtsp_session_state;
-	janus_source_socket socket[JANUS_SOURCE_STREAM_MAX][JANUS_SOURCE_SOCKET_MAX];
-	janus_source_rtcp_cbk_data rtcp_cbk_data[JANUS_SOURCE_STREAM_MAX];
 	idilia_codec codec[JANUS_SOURCE_STREAM_MAX];
 	gint codec_pt[JANUS_SOURCE_STREAM_MAX];
+    GHashTable * sockets;
+	pipeline_callback_data_t * callback_data;
 } janus_source_session;
 
 
