@@ -22,6 +22,8 @@ typedef struct janus_source_session {
 	gchar * id; /* stream id */
 	CURL *curl_handle;	
 	gchar *status_service_url;
+	gchar *keepalive_service_url;
+	const gchar *pid; 
 	idilia_codec codec[JANUS_SOURCE_STREAM_MAX];
 	gint codec_pt[JANUS_SOURCE_STREAM_MAX];
     GHashTable * sockets;

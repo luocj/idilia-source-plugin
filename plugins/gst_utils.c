@@ -11,7 +11,7 @@ static GstSDPMessage * create_sdp(GstRTSPClient * client, GstRTSPMedia * media);
 static gchar * janus_source_create_launch_pipe(janus_source_session * session, pipeline_callback_data_t * data);
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, pipeline_callback_data_t * data);
 static void client_connected_cb(GstRTSPServer *gstrtspserver, GstRTSPClient *gstrtspclient, pipeline_callback_data_t * data);
-static gchar *janus_source_create_json_request(gchar *request);
+static gchar *janus_source_create_json_request(gchar *request, const gchar *pid);
 
 
 static GstSDPMessage *
@@ -377,7 +377,7 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	}
 
 #ifdef USE_REGISTRY_SERVICE
-	gchar *http_request_data = janus_source_create_json_request(session->rtsp_url);
+	gchar *http_request_data = janus_source_create_json_request(session->rtsp_url, session->pid);
 	json_t *db_id_json_object = NULL;
 
 	if (curl_request(session->curl_handle, session->status_service_url, http_request_data, "POST", &db_id_json_object) != TRUE) {
@@ -423,12 +423,13 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 #endif
 }
 
-gchar *janus_source_create_json_request(gchar *request)
+gchar *janus_source_create_json_request(gchar *request, const gchar *pid)
 {
 	json_t *object = json_object();
 	const gchar *URI = "uri";
 	const gchar *REGEX_PATTERN = "\\/";
 	const gchar *ID_JSON_FIELD = "id";
+	const gchar *PID_JSON_FIELD = "pid";
 
     json_object_set_new(object, URI, json_string(request)); 
 
@@ -439,6 +440,9 @@ gchar *janus_source_create_json_request(gchar *request)
 		json_object_set_new(object, ID_JSON_FIELD, json_string(result[g_strv_length(result)-1]));
 		g_strfreev (result);
     }
+
+	if(pid)
+		json_object_set_new(object, PID_JSON_FIELD, json_string(pid));
 
     gchar *request_str = json_dumps(object, JSON_PRESERVE_ORDER);
 	 
