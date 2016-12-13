@@ -306,7 +306,7 @@ void *janus_source_keepalive(void *data);
 void *janus_source_keepalive(void *data) {
 	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive started\n");
 
-	gchar *body_str = g_strdup_printf("{\"pid\": \"%s\", \"dly\": \"%lu\"}", PID, (uint64_t)(keepalive_interval/1000000));
+	gchar *body_str = g_strdup_printf("{\"pid\": \"%s\", \"dly\": \"%lu\"}", PID, (uint64_t)(keepalive_interval/G_USEC_PER_SEC));
 	json_t *res_json_object = NULL;	
 
 	while (g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
@@ -1186,7 +1186,7 @@ static void janus_source_parse_keepalive_interval(janus_config_item *config_keep
 	if (config_keepalive_interval && config_keepalive_interval->value)
 	{
 		uint32_t it = atoi(config_keepalive_interval->value);
-		*interval = 1000000 * it; //config interval in sec, must be converted to microseconds
+		*interval = G_USEC_PER_SEC * it; //config interval in sec, must be converted to microseconds
 
 		if (*interval == 0)
 			*interval = keepalive_interval;
