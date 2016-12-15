@@ -306,27 +306,30 @@ void *janus_source_keepalive(void *data);
 void *janus_source_keepalive(void *data) {
 	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive started\n");
 
+	CURL *curl = curl_init();
 	gchar *body_str = g_strdup_printf("{\"pid\": \"%s\", \"dly\": \"%lu\"}", PID, (uint64_t)(keepalive_interval/G_USEC_PER_SEC));
 	json_t *res_json_object = NULL;	
 
 	while (g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
 		janus_mutex_lock(&keepalive_mutex);
 		
-		gboolean retCode = curl_request(curl_handle, keepalive_service_url, body_str, "POST", &res_json_object);		    		
+		gboolean retCode = curl_request(curl, keepalive_service_url, body_str, "POST", &res_json_object);
 		if (retCode != TRUE) {
-			JANUS_LOG(LOG_ERR, "Could not send the request to the server.\n"); 
+			JANUS_LOG(LOG_ERR, "Could not send the request to the server.\n");
 		}else{
-			if (json_is_object(res_json_object)) json_decref(res_json_object); 				
+			if (json_is_object(res_json_object)) json_decref(res_json_object);
 			else JANUS_LOG(LOG_ERR, "Not valid json object.\n");
 		}
 
 		janus_mutex_unlock(&keepalive_mutex);
-		g_usleep(keepalive_interval);						
+		g_usleep(keepalive_interval);
 	}
 
 	if (body_str) {
 		g_free(body_str);
 	}
+
+	curl_cleanup(curl);
 
 	JANUS_LOG(LOG_INFO, "SourcePlugin keepalive stopped\n");
 	return NULL;
@@ -1128,7 +1131,8 @@ static void janus_source_close_session(janus_source_session * session) {
 	curl_request(curl_handle, curl_str, "{}", "DELETE", NULL);		    
 #endif	    
 
-	janus_source_rtsp_remove_mountpoint(rtsp_server_data, session->id, session->callback_data);
+	if(rtsp_server_data && session->callback_data)	
+		janus_source_rtsp_remove_mountpoint(rtsp_server_data, session->id, session->callback_data);
 
 	if (session->sockets) {
 		JANUS_LOG(LOG_VERB, "Closing session sockets\n");
