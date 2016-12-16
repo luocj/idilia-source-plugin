@@ -83,7 +83,7 @@ int close_and_destroy_sockets(gpointer key, janus_source_socket * sck, gpointer 
 
 void pipeline_callback_data_destroy(pipeline_callback_data_t * data) {
 	g_assert(data);
-	JANUS_LOG(LOG_INFO, "Freeing callback data for session: %s\n", data->id);
+	JANUS_LOG(LOG_VERB, "Freeing callback data for session: %s\n", data->id);
 	g_hash_table_foreach_remove(data->sockets, (GHRFunc)close_and_destroy_sockets, NULL);
 	g_hash_table_destroy(data->sockets);
 	g_free(data->id);
@@ -111,7 +111,7 @@ static void set_custom_socket(GHashTable * sockets, GstElement *bin, const gchar
 
 static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_INFO, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
+	JANUS_LOG(LOG_VERB, "rtsp_media_target_state_cb: %s\n", gst_element_state_get_name((GstState)state));
 
 	if (!data) {
 		JANUS_LOG(LOG_ERR, "Calback data is null\n");
@@ -119,7 +119,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, p
 	}
 	
 	if (state == GST_STATE_PAUSED) {
-		JANUS_LOG(LOG_INFO, "Setting custom sockets\n");		
+		JANUS_LOG(LOG_VERB, "Setting custom sockets\n");		
 		GstElement * bin = gst_rtsp_media_get_element(gstrtspmedia);
 		g_assert(bin);
 		
@@ -132,7 +132,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, p
 		g_object_unref(bin);
 
 		if (data->id_rtsp_media_target_state_cb > 0) {
-			JANUS_LOG(LOG_INFO, "Disconnecting signal rtsp_media_target_state_cb: %lu\n", data->id_rtsp_media_target_state_cb);
+			JANUS_LOG(LOG_VERB, "Disconnecting signal rtsp_media_target_state_cb: %lu\n", data->id_rtsp_media_target_state_cb);
 			g_signal_handler_disconnect(gstrtspmedia, data->id_rtsp_media_target_state_cb);
 			data->id_rtsp_media_target_state_cb = 0;
 		}
@@ -141,7 +141,7 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, p
 
 static void media_configure_cb(GstRTSPMediaFactory * factory, GstRTSPMedia * media, pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_INFO, "media_configure callback\n") ;
+	JANUS_LOG(LOG_VERB, "media_configure callback\n") ;
 	 
 	if (!data) {
 		JANUS_LOG(LOG_ERR, "Calback data is null\n");
@@ -157,7 +157,7 @@ client_pause_request_cb(GstRTSPClient  *gstrtspclient,
 	GstRTSPContext *rtspcontext,
 	pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_INFO, "client_pause_request_cb\n");	
+	JANUS_LOG(LOG_VERB, "client_pause_request_cb\n");	
 
 	if (!data) {
 		JANUS_LOG(LOG_ERR, "Calback data is NULL\n");
@@ -172,7 +172,7 @@ client_setup_request_cb(GstRTSPClient  *gstrtspclient,
 	GstRTSPContext *rtspcontext,
 	pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_INFO, "client_setup_request_cb\n");
+	JANUS_LOG(LOG_VERB, "client_setup_request_cb\n");
 
 	if (!data) {
 		JANUS_LOG(LOG_ERR, "Calback data is NULL\n");
@@ -188,7 +188,7 @@ client_connected_cb(GstRTSPServer *gstrtspserver,
 	GstRTSPClient *gstrtspclient,
 	pipeline_callback_data_t * data)
 {
-	JANUS_LOG(LOG_INFO, "New client connected\n");	
+	JANUS_LOG(LOG_VERB, "New client connected\n");	
 
 	if (!data) {
 		JANUS_LOG(LOG_ERR, "Calback data is null\n");
@@ -318,7 +318,7 @@ void janus_rtsp_handle_client_callback(gpointer data) {
 	}
 
 	if (g_atomic_int_get(&session->hangingup) || session->destroyed) {
-		JANUS_LOG(LOG_INFO, "Session is being destroyed\n");	
+		JANUS_LOG(LOG_WARN, "Session is being destroyed\n");	
 		return;	 
 	}
 
