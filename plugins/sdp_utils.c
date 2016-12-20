@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "sdp_utils.h"
 
-
+#include "../debug.h"
 typedef struct
 {
 	const gchar *name;
@@ -100,14 +100,14 @@ gchar * sdp_set_video_codec(const gchar * sdp_offer, idilia_codec video_codec) {
 		return g_strdup(sdp_offer);
 		
 	} else {
-		gchar *result = NULL;
-		GRegex *regex = g_regex_new("m=video[ \t]+1[ \t]+UDP/TLS/RTP/SAVPF[ \t]+[0-9]+[ \t]+[0-9]+", 0, 0, NULL);
+		gchar *result = NULL;		
+		GRegex *regex = g_regex_new("m=video[ \t]+[0-9]+[ \t]+UDP/TLS/RTP/SAVPF[ \t]+[0-9]+[ \t]+[0-9]+", 0, 0, NULL);
 		gint codec1 = -1, codec2 = -1;
 	
 		if (regex != NULL) {
 			GMatchInfo *matchInfo;
 			g_regex_match(regex, sdp_offer, 0, &matchInfo);
-	
+			JANUS_LOG(LOG_ERR,"\n\nSDP: %s\n\n",sdp_offer);
 			if (g_match_info_matches(matchInfo)) {
 				result = g_match_info_fetch(matchInfo, 0);
 				
@@ -193,7 +193,7 @@ static gchar * str_replace_once(const gchar * input, const gchar * old_string, c
 static gint sdp_get_codec_pt_for_type(const gchar * sdp, const gchar * type)
 {
 	gchar *result = NULL;
-	gchar * expr_str = g_strdup_printf("m=%s[ \t]+1[ \t]+UDP/TLS/RTP/SAVPF[ \t]+[0-9]+", type);
+	gchar * expr_str = g_strdup_printf("m=%s[ \t]+[0-9]+[ \t]+UDP/TLS/RTP/SAVPF[ \t]+[0-9]+", type);
 	GRegex *regex = g_regex_new(expr_str, 0, 0, NULL);
 	gint codec_pt = -1;
 	
@@ -207,7 +207,7 @@ static gint sdp_get_codec_pt_for_type(const gchar * sdp, const gchar * type)
 			result = g_match_info_fetch(matchInfo, 0);
 				
 			if (result) {
-				gchar * sscanf_str = g_strdup_printf("m=%s%%*[ \t]1%%*[ \t]UDP/TLS/RTP/SAVPF%%*[ \t]%%d", type);
+				gchar * sscanf_str = g_strdup_printf("m=%s%%*[ \t]9%%*[ \t]UDP/TLS/RTP/SAVPF%%*[ \t]%%d", type);
 				sscanf(result, sscanf_str, &codec_pt);
 				g_free(sscanf_str);
 				g_free(result);

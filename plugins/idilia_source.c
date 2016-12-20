@@ -580,8 +580,10 @@ void janus_source_setup_media(janus_plugin_session *handle) {
 	queue_event_data->callback = janus_rtsp_handle_client_callback;
 	queue_event_data->session = session;
 
+	
 	g_async_queue_push(rtsp_server_data->rtsp_async_queue, queue_event_data) ;
 	g_main_context_wakeup(NULL) ;
+
 }
 
 void janus_source_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
@@ -1030,8 +1032,8 @@ static void janus_source_close_session(janus_source_session * session) {
 #ifdef USE_REGISTRY_SERVICE
 	curl_request(curl_handle, curl_str, "{}", "DELETE", NULL);		    
 #endif	    
-
-	janus_source_rtsp_remove_mountpoint(rtsp_server_data, session->id, session->callback_data);
+	if(rtsp_server_data && session->callback_data)	
+		janus_source_rtsp_remove_mountpoint(rtsp_server_data, session->id, session->callback_data);
 
 	if (session->sockets) {
 		JANUS_LOG(LOG_VERB, "Closing session sockets\n");
