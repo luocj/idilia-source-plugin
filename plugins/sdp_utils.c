@@ -95,7 +95,7 @@ gchar * sdp_set_video_codec(const gchar * sdp_offer, idilia_codec video_codec) {
 	gchar * sdp_answer = NULL;
 	
 	gint current_codec_pt = sdp_get_codec_pt_for_type(sdp_offer, "video");
-	gint desired_codec_pt = sdp_pt_to_codec_id(sdp_offer, video_codec);
+	gint desired_codec_pt = sdp_get_codec_pt(sdp_offer, video_codec);
 	
 	/* do nothing in case the preferred codec is already selected, or if it does not exist in the SDP */
 	if (current_codec_pt == desired_codec_pt || video_codec == IDILIA_CODEC_INVALID) {
@@ -115,7 +115,7 @@ gchar * sdp_set_video_codec(const gchar * sdp_offer, idilia_codec video_codec) {
 				result = g_match_info_fetch(matchInfo, 0);
 				
 				if (result) {
-					sscanf(result, "m=video%*[ \t]%d[ \t]UDP/TLS/RTP/SAVPF%*[ \t]%d%[ \t]%d",&port_video, &codec1, &codec2);
+					sscanf(result, "m=video%*[ \t]%d[ \t]UDP/TLS/RTP/SAVPF%*[ \t]%d%*[ \t]%d",&port_video, &codec1, &codec2);
 					
 					if (codec2 != desired_codec_pt) {
 						codec1 = codec2;
