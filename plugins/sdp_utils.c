@@ -114,9 +114,8 @@ gchar * sdp_set_video_codec(const gchar * sdp_offer, idilia_codec video_codec) {
 			if (g_match_info_matches(matchInfo)) {
 				result = g_match_info_fetch(matchInfo, 0);
 				
-				if (result) {
-					sscanf(result, "m=video%*[ \t]%d[ \t]UDP/TLS/RTP/SAVPF%*[ \t]%d%*[ \t]%d",&port_video, &codec1, &codec2);
-					
+				if (result) {					
+					sscanf(result,"m=video%*[ \t]%d%*[ \t]UDP/TLS/RTP/SAVPF%*[ \t]%d%*[ \t]%d" ,&port_video,&codec1,&codec2);
 					if (codec2 != desired_codec_pt) {
 						codec1 = codec2;
 					}
