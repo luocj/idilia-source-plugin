@@ -129,6 +129,10 @@ static void rtsp_media_target_state_cb(GstRTSPMedia *gstrtspmedia, gint state, p
 		set_custom_socket(data->sockets, bin, SOCKET_AUDIO_RTP_SRV);
 		set_custom_socket(data->sockets, bin, SOCKET_AUDIO_RTCP_RCV_SRV);
 
+#if 0
+		JANUS_LOG(LOG_INFO, "Source: dumping dot file\n");
+		GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(bin), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline_source");
+#endif
 		g_object_unref(bin);
 
 		if (data->id_rtsp_media_target_state_cb > 0) {

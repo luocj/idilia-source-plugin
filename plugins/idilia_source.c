@@ -1107,6 +1107,12 @@ gboolean janus_source_send_rtcp_src_received(GSocket *socket, GIOCondition condi
 	len = g_socket_receive(socket, (gchar*)buf, sizeof(buf), NULL, NULL);
 
 	if (len > 0) {
+
+		if (janus_rtcp_has_pli(buf, len))
+		{
+			JANUS_LOG(LOG_VERB, "Source: received PLI\n");
+		}
+
 		JANUS_LOG(LOG_HUGE, "%s RTCP sent; len=%ld\n", data->is_video ? "Video" : "Audio", len);
 		gateway->relay_rtcp(session->handle, data->is_video, buf, len);
 	}
